@@ -312,7 +312,9 @@ tailscale funnel --bg --yes http://127.0.0.1:8000
 tailscale funnel status
 ```
 
-Public URL on this host: `https://bhaskars-macbook-pro.tail060b33.ts.net/`. Funnel proxies the website, API, SSE, and audio over HTTPS. Frontend URLs remain relative; Redis and LocalStack remain local. The host must stay awake with Docker Desktop and Tailscale running.
+Public URL on this host: `https://radioworkx.tail060b33.ts.net/`. Funnel proxies the website, API, SSE, and audio over HTTPS. Frontend URLs remain relative; Redis and LocalStack remain local. The host must stay awake with Docker Desktop and Tailscale running.
+
+After renaming the Tailscale device, rerun `tailscale funnel --bg --https=443 http://127.0.0.1:8000` and verify `tailscale funnel status` lists the new hostname. Saved Funnel routes can still reference the previous name after a rename.
 
 `COOKIE_SECURE=1` marks listener cookies Secure despite the proxy-to-container HTTP connection. Opening the page upgrades existing cookie flags while preserving the session. Remote listeners should use the HTTPS hostname, which supplies the secure browser context required for reaction/request UUIDs.
 

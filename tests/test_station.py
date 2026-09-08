@@ -36,3 +36,20 @@ def test_blocked_queue_uses_eligible_cached_library(metadata):
         safe={**metadata,'id':'cached','artists':['Other'],'album_id':'other'}
         c.execute("INSERT INTO tracks(id,metadata,status,duration,path) VALUES('cached',?,'ready',100,'cached.mp3')",(json.dumps(safe),))
     assert select_next(500)[0]['track_id']=='cached'
+
+
+def test_peek_and_transmission_agree_after_old_history_expires(metadata):
+    from app.station import peek
+    from app.policy import WINDOW
+    with db.transaction() as c:
+        for n in range(5):
+            tid=str(n)
+            meta={**metadata,'id':tid,'artists':[tid],'album_id':tid}
+            c.execute("INSERT INTO tracks(id,metadata,status,duration,path,downloaded_at) VALUES(?,?,'ready',100,'test.mp3',?)",(tid,json.dumps(meta),n))
+            if n<4:
+                c.execute('INSERT INTO plays(id,track_id,metadata,starts,ends,actual_end) VALUES(?,?,?,?,?,?)',(tid,tid,json.dumps(meta),n*100,n*100+90,n*100+90))
+    at=WINDOW+1000
+    candidate=peek(at)
+    assert candidate['id']=='4'
+    selected=select_next(at,expected_track_id=candidate['id'],expected_request_id=candidate.get('request_id'))
+    assert selected and selected[0]['track_id']=='4'

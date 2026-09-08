@@ -664,3 +664,11 @@ Automatic acquisition history uses `/api/downloads?scope=automatic` and includes
 completed refill downloads, library reuse, and terminal outcomes. Filters apply
 before pagination; older history is not limited to the recent SSE snapshot. Both
 sections preserve their selected page during live refreshes.
+
+Playback selection and introduction previews use the same complete listening
+history for variety ranking. Eligibility still enforces the rolling three-hour
+artist/album limits inside the policy check. Truncating only the final selection's
+history can otherwise make it disagree with the preview forever after older plays
+expire from that window. Introductions use cached or finished background speech;
+the music loop never waits for speech generation. If an introduction is not ready,
+that track starts without it and upcoming speech continues preparing in the background.

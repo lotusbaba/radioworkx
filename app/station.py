@@ -54,7 +54,9 @@ def select_next(now=None, expected_track_id=None, start_delay=0, expected_reques
     now = time.time() if now is None else now
     with db.transaction() as c:
         refresh_genre_head(c, now)
-        history = [dict(p,metadata=json.loads(p['metadata'])) for p in c.execute('SELECT * FROM plays WHERE ends>? OR id IN (SELECT id FROM plays ORDER BY starts DESC LIMIT 3) ORDER BY starts',(now-WINDOW,)).fetchall()]
+        # Variety ranking needs older plays too. Match peek/preview exactly;
+        # eligible() itself applies the three-hour performance window.
+        history = [dict(p,metadata=json.loads(p['metadata'])) for p in c.execute('SELECT * FROM plays ORDER BY starts')]
         from app.scheduling import candidates, choose
         selected = choose(candidates(c), history, now)
         if expected_track_id is not None and (not selected or selected['id'] != expected_track_id):
@@ -117,6 +119,19 @@ def start_music(play):
     publish('track',play)
 
 
+def ready_intro(candidate, warm):
+    """Use prepared speech only; provider latency must never hold the music loop."""
+    from app import announcer
+    if not announcer.enabled(): return None
+    if warm and warm[0]==(candidate['id'],candidate.get('request_id')) and warm[1].done():
+        try:
+            intro=warm[1].result()
+            if intro: return intro
+        except Exception:
+            log.warning('Prepared introduction unavailable; continuing with music')
+    return announcer.cached(candidate['meta'],requested='request_id' in candidate)
+
+
 def run():
     from concurrent.futures import ThreadPoolExecutor
     from app import announcer
@@ -134,14 +149,7 @@ def run():
             with db.transaction() as c: db.set_setting(c,'station_status','Waiting for eligible tracks')
             time.sleep(1)
             continue
-        intro = None
-        if announcer.enabled():
-            with db.transaction() as c: db.set_setting(c,'station_status','Preparing AI introduction')
-            if warm and warm[0]==(candidate['id'],candidate.get('request_id')):
-                try: intro = warm[1].result(timeout=90)
-                except Exception: intro = None
-            else:
-                intro = announcer.prepare(candidate['meta'],requested='request_id' in candidate)
+        intro = ready_intro(candidate,warm)
         selected = select_next(expected_track_id=candidate['id'],start_delay=intro['duration'] if intro else 0,expected_request_id=candidate.get('request_id'))
         if not selected: continue  # Queue changed during preparation: never introduce the wrong track.
         play,path = selected

@@ -79,3 +79,28 @@ def test_failed_speech_has_bounded_retry_and_music_can_continue(metadata,monkeyp
     assert announcer.prepare(metadata) is None
     assert announcer.prepare(metadata) is None
     assert len(calls)==3  # page fetch and both script attempts, then cooldown.
+
+
+def test_unfinished_intro_never_blocks_music(metadata,monkeypatch):
+    from concurrent.futures import Future
+    monkeypatch.setattr(announcer,'enabled',lambda:True)
+    monkeypatch.setattr(announcer,'cached',lambda *a,**k:None)
+    def forbidden(*a,**k):raise AssertionError('Must not generate or wait in music loop')
+    monkeypatch.setattr(announcer,'prepare',forbidden)
+    future=Future()
+    monkeypatch.setattr(future,'result',forbidden)
+    candidate={'id':metadata['id'],'meta':metadata}
+    assert station.ready_intro(candidate,((metadata['id'],None),future)) is None
+    assert station.ready_intro(candidate,None) is None
+
+
+def test_prepared_intro_matches_request_context(metadata,monkeypatch):
+    from concurrent.futures import Future
+    monkeypatch.setattr(announcer,'enabled',lambda:True)
+    monkeypatch.setattr(announcer,'cached',lambda *a,**k:None)
+    future=Future();future.set_result({'script':'Requested song'})
+    warm=((metadata['id'],'request-1'),future)
+    candidate={'id':metadata['id'],'meta':metadata,'request_id':'request-1'}
+    assert station.ready_intro(candidate,warm)=={'script':'Requested song'}
+    candidate.pop('request_id')
+    assert station.ready_intro(candidate,warm) is None

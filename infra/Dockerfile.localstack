@@ -1,0 +1,9 @@
+# Build the requested fork, pinned to the revision inspected for this project.
+FROM python:3.13-slim
+ARG LOCALSTACK_REV=8b9a79f05846835cf4dff63ab7eefdde9df83783
+RUN apt-get update && apt-get install -y --no-install-recommends git gcc g++ make libffi-dev libssl-dev curl && rm -rf /var/lib/apt/lists/*
+RUN git clone https://github.com/lotusbaba/localstack.git /opt/localstack && cd /opt/localstack && git checkout "${LOCALSTACK_REV}"
+RUN pip install --no-cache-dir -r /opt/localstack/requirements-runtime.txt && pip install --no-cache-dir --no-deps '/opt/localstack[runtime]'
+ENV SERVICES=sqs EAGER_SERVICE_LOADING=1 GATEWAY_LISTEN=0.0.0.0:4566 DNS_ADDRESS=0 LOCALSTACK_HOST=localstack:4566 SQS_ENDPOINT_STRATEGY=path
+EXPOSE 4566
+CMD ["python", "-m", "localstack.runtime.main"]

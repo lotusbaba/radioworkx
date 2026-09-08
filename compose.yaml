@@ -1,0 +1,96 @@
+name: radioworkx
+x-app: &app
+  build: .
+  environment: &env
+    DATA_DIR: ${RADIO_DATA_DIR:-/data}
+    REDIS_URL: redis://redis:6379/${REDIS_DB:-0}
+    QUEUE_PREFIX: ${QUEUE_PREFIX:-radio}
+    AWS_ENDPOINT_URL: http://localstack:4566
+    AWS_DEFAULT_REGION: us-east-1
+    AWS_ACCESS_KEY_ID: test
+    AWS_SECRET_ACCESS_KEY: test
+    SESSION_SECRET: ${SESSION_SECRET:-local-development-change-me}
+    COOKIE_SECURE: ${COOKIE_SECURE:-0}
+    REACTION_THRESHOLD: ${REACTION_THRESHOLD:-20}
+    DOWNLOAD_HOSTS: ${DOWNLOAD_HOSTS:-}
+    DEMO_MODE: ${DEMO_MODE:-0}
+    VIDEOS_ENABLED: ${VIDEOS_ENABLED:-1}
+    MEDIA_BUCKET: ${MEDIA_BUCKET:-radioworkx-media}
+    CRAWLER_ENABLED: ${CRAWLER_ENABLED:-1}
+    CRAWLER_PAGE_BUDGET: ${CRAWLER_PAGE_BUDGET:-20}
+  volumes:
+    - radio-data:/data
+  restart: unless-stopped
+  depends_on:
+    redis:
+      condition: service_healthy
+    localstack:
+      condition: service_healthy
+services:
+  localstack:
+    build:
+      context: .
+      dockerfile: infra/Dockerfile.localstack
+    environment:
+      SERVICES: sqs,s3
+    volumes: ["localstack-data:/var/lib/localstack"]
+    ports: ["127.0.0.1:4566:4566"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "always"]
+    volumes: ["redis-data:/data"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+  api:
+    <<: *app
+    environment:
+      <<: *env
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_CHAT_MODEL: ${OPENAI_CHAT_MODEL:-gpt-4.1-mini}
+      OPENAI_CHAT_DAILY_LIMIT: ${OPENAI_CHAT_DAILY_LIMIT:-500}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+    ports: ["127.0.0.1:${RADIO_PORT:-8000}:8000"]
+  dispatcher:
+    <<: *app
+    command: ["python", "-m", "app.workers", "dispatch"]
+  crawler:
+    <<: *app
+    command: ["python", "-m", "app.workers", "crawler"]
+  reactions:
+    <<: *app
+    command: ["python", "-m", "app.workers", "reactions"]
+  downloads:
+    <<: *app
+    command: ["python", "-m", "app.workers", "downloads"]
+  visuals:
+    <<: *app
+    environment:
+      <<: *env
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      VIDEO_MODEL: ${VIDEO_MODEL:-sora-2}
+    command: ["python", "-m", "app.workers", "visuals"]
+  station:
+    <<: *app
+    environment:
+      <<: *env
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_CHAT_MODEL: ${OPENAI_CHAT_MODEL:-gpt-4.1-mini}
+      ANNOUNCER_ENABLED: ${ANNOUNCER_ENABLED:-1}
+      ANNOUNCER_MODEL: ${ANNOUNCER_MODEL:-gpt-4o-mini-tts}
+      ANNOUNCER_VOICE: ${ANNOUNCER_VOICE:-onyx}
+      ANNOUNCER_GAIN_DB: ${ANNOUNCER_GAIN_DB:-6}
+    command: ["python", "-m", "app.workers", "station"]
+volumes:
+  localstack-data:
+  radio-data:
+  redis-data:

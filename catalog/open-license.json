@@ -1,0 +1,602 @@
+[
+  {
+    "id": "bc-100289031",
+    "title": "Final Life",
+    "artists": [
+      "HeXXeL"
+    ],
+    "album": "Chromium",
+    "album_id": "bc-album-2097918545",
+    "genre": "chiptune",
+    "bandcamp_url": "https://hexxel.bandcamp.com/track/final-life",
+    "compilation_id": null,
+    "bandcamp_track_id": 100289031,
+    "source_kind": "bandcamp_cc",
+    "source_url": "https://hexxel.bandcamp.com/track/final-life",
+    "license_url": "https://creativecommons.org/licenses/by/4.0/",
+    "license_name": "CC BY 4.0",
+    "audio_changes": "MP3 format conversion only",
+    "rights": "CC BY 4.0, published by HeXXeL on https://hexxel.bandcamp.com/track/final-life; license verified again at acquisition.",
+    "attribution": "Final Life by HeXXeL — Chromium. CC BY 4.0. Source: https://hexxel.bandcamp.com/track/final-life. MP3 format conversion only."
+  },
+  {
+    "id": "bc-3644708341",
+    "title": "Enter The Dungeon",
+    "artists": [
+      "HeXXeL"
+    ],
+    "album": "Chromium",
+    "album_id": "bc-album-2097918545",
+    "genre": "chiptune",
+    "bandcamp_url": "https://hexxel.bandcamp.com/track/enter-the-dungeon",
+    "compilation_id": null,
+    "bandcamp_track_id": 3644708341,
+    "source_kind": "bandcamp_cc",
+    "source_url": "https://hexxel.bandcamp.com/track/enter-the-dungeon",
+    "license_url": "https://creativecommons.org/licenses/by/4.0/",
+    "license_name": "CC BY 4.0",
+    "audio_changes": "MP3 format conversion only",
+    "rights": "CC BY 4.0, published by HeXXeL on https://hexxel.bandcamp.com/track/enter-the-dungeon; license verified again at acquisition.",
+    "attribution": "Enter The Dungeon by HeXXeL — Chromium. CC BY 4.0. Source: https://hexxel.bandcamp.com/track/enter-the-dungeon. MP3 format conversion only."
+  },
+  {
+    "id": "bc-1259538180",
+    "title": "Prince ROM",
+    "artists": [
+      "HeXXeL"
+    ],
+    "album": "Chromium",
+    "album_id": "bc-album-2097918545",
+    "genre": "chiptune",
+    "bandcamp_url": "https://hexxel.bandcamp.com/track/prince-rom",
+    "compilation_id": null,
+    "bandcamp_track_id": 1259538180,
+    "source_kind": "bandcamp_cc",
+    "source_url": "https://hexxel.bandcamp.com/track/prince-rom",
+    "license_url": "https://creativecommons.org/licenses/by/4.0/",
+    "license_name": "CC BY 4.0",
+    "audio_changes": "MP3 format conversion only",
+    "rights": "CC BY 4.0, published by HeXXeL on https://hexxel.bandcamp.com/track/prince-rom; license verified again at acquisition.",
+    "attribution": "Prince ROM by HeXXeL — Chromium. CC BY 4.0. Source: https://hexxel.bandcamp.com/track/prince-rom. MP3 format conversion only."
+  },
+  {
+    "id": "bc-3073456698",
+    "title": "Tampered",
+    "artists": [
+      "HeXXeL"
+    ],
+    "album": "Chromium",
+    "album_id": "bc-album-2097918545",
+    "genre": "chiptune",
+    "bandcamp_url": "https://hexxel.bandcamp.com/track/tampered",
+    "compilation_id": null,
+    "bandcamp_track_id": 3073456698,
+    "source_kind": "bandcamp_cc",
+    "source_url": "https://hexxel.bandcamp.com/track/tampered",
+    "license_url": "https://creativecommons.org/licenses/by/4.0/",
+    "license_name": "CC BY 4.0",
+    "audio_changes": "MP3 format conversion only",
+    "rights": "CC BY 4.0, published by HeXXeL on https://hexxel.bandcamp.com/track/tampered; license verified again at acquisition.",
+    "attribution": "Tampered by HeXXeL — Chromium. CC BY 4.0. Source: https://hexxel.bandcamp.com/track/tampered. MP3 format conversion only."
+  },
+  {
+    "id": "bc-661231690",
+    "title": "Unreleased 1",
+    "artists": [
+      "Stevia Sphere"
+    ],
+    "album": "Collection",
+    "album_id": "bc-album-1219924122",
+    "genre": "vaporwave",
+    "bandcamp_url": "https://steviasphere.bandcamp.com/track/unreleased-1",
+    "compilation_id": null,
+    "bandcamp_track_id": 661231690,
+    "source_kind": "bandcamp_cc",
+    "source_url": "https://steviasphere.bandcamp.com/track/unreleased-1",
+    "license_url": "https://creativecommons.org/licenses/by/4.0/",
+    "license_name": "CC BY 4.0",
+    "audio_changes": "MP3 format conversion only",
+    "rights": "CC BY 4.0, published by Stevia Sphere on https://steviasphere.bandcamp.com/track/unreleased-1; license verified again at acquisition.",
+    "attribution": "Unreleased 1 by Stevia Sphere — Collection. CC BY 4.0. Source: https://steviasphere.bandcamp.com/track/unreleased-1. MP3 format conversion only."
+  },
+  {
+    "id": "bc-3610165574",
+    "title": "Zen Garden Elevator",
+    "artists": [
+      "Stevia Sphere"
+    ],
+    "album": "Collection",
+    "album_id": "bc-album-1219924122",
+    "genre": "vaporwave",
+    "bandcamp_url": "https://steviasphere.bandcamp.com/track/zen-garden-elevator",
+    "compilation_id": null,
+    "bandcamp_track_id": 3610165574,
+    "source_kind": "bandcamp_cc",
+    "source_url": "https://steviasphere.bandcamp.com/track/zen-garden-elevator",
+    "license_url": "https://creativecommons.org/licenses/by/4.0/",
+    "license_name": "CC BY 4.0",
+    "audio_changes": "MP3 format conversion only",
+    "rights": "CC BY 4.0, published by Stevia Sphere on https://steviasphere.bandcamp.com/track/zen-garden-elevator; license verified again at acquisition.",
+    "attribution": "Zen Garden Elevator by Stevia Sphere — Collection. CC BY 4.0. Source: https://steviasphere.bandcamp.com/track/zen-garden-elevator. MP3 format conversion only."
+  },
+  {
+    "id": "bc-2687936148",
+    "title": "Unreleased 2",
+    "artists": [
+      "Stevia Sphere"
+    ],
+    "album": "Collection",
+    "album_id": "bc-album-1219924122",
+    "genre": "vaporwave",
+    "bandcamp_url": "https://steviasphere.bandcamp.com/track/unreleased-2",
+    "compilation_id": null,
+    "bandcamp_track_id": 2687936148,
+    "source_kind": "bandcamp_cc",
+    "source_url": "https://steviasphere.bandcamp.com/track/unreleased-2",
+    "license_url": "https://creativecommons.org/licenses/by/4.0/",
+    "license_name": "CC BY 4.0",
+    "audio_changes": "MP3 format conversion only",
+    "rights": "CC BY 4.0, published by Stevia Sphere on https://steviasphere.bandcamp.com/track/unreleased-2; license verified again at acquisition.",
+    "attribution": "Unreleased 2 by Stevia Sphere — Collection. CC BY 4.0. Source: https://steviasphere.bandcamp.com/track/unreleased-2. MP3 format conversion only."
+  },
+  {
+    "id": "bc-1567844403",
+    "title": "Ignored in Front of the Store",
+    "artists": [
+      "Justin Allan Arnold / IFNESS"
+    ],
+    "album": "Jazz - Royalty Free - Compilation",
+    "album_id": "bc-album-162340413",
+    "genre": "jazz",
+    "bandcamp_url": "https://justinallanarnold.bandcamp.com/track/ignored-in-front-of-the-store-2",
+    "compilation_id": "bc-compilation-162340413",
+    "bandcamp_track_id": 1567844403,
+    "source_kind": "bandcamp_cc",
+    "source_url": "https://justinallanarnold.bandcamp.com/track/ignored-in-front-of-the-store-2",
+    "license_url": "https://creativecommons.org/licenses/by/4.0/",
+    "license_name": "CC BY 4.0",
+    "audio_changes": "MP3 format conversion only",
+    "rights": "CC BY 4.0, published by Justin Allan Arnold / IFNESS on https://justinallanarnold.bandcamp.com/track/ignored-in-front-of-the-store-2; license verified again at acquisition.",
+    "attribution": "Ignored in Front of the Store by Justin Allan Arnold / IFNESS — Jazz - Royalty Free - Compilation. CC BY 4.0. Source: https://justinallanarnold.bandcamp.com/track/ignored-in-front-of-the-store-2. MP3 format conversion only."
+  },
+  {
+    "id": "bc-969797552",
+    "title": "Sunday in the City",
+    "artists": [
+      "Justin Allan Arnold / IFNESS"
+    ],
+    "album": "Jazz - Royalty Free - Compilation",
+    "album_id": "bc-album-162340413",
+    "genre": "jazz",
+    "bandcamp_url": "https://justinallanarnold.bandcamp.com/track/sunday-in-the-city-2",
+    "compilation_id": "bc-compilation-162340413",
+    "bandcamp_track_id": 969797552,
+    "source_kind": "bandcamp_cc",
+    "source_url": "https://justinallanarnold.bandcamp.com/track/sunday-in-the-city-2",
+    "license_url": "https://creativecommons.org/licenses/by/4.0/",
+    "license_name": "CC BY 4.0",
+    "audio_changes": "MP3 format conversion only",
+    "rights": "CC BY 4.0, published by Justin Allan Arnold / IFNESS on https://justinallanarnold.bandcamp.com/track/sunday-in-the-city-2; license verified again at acquisition.",
+    "attribution": "Sunday in the City by Justin Allan Arnold / IFNESS — Jazz - Royalty Free - Compilation. CC BY 4.0. Source: https://justinallanarnold.bandcamp.com/track/sunday-in-the-city-2. MP3 format conversion only."
+  },
+  {
+    "id": "bc-1626121828",
+    "title": "New York November",
+    "artists": [
+      "Justin Allan Arnold / IFNESS"
+    ],
+    "album": "Jazz - Royalty Free - Compilation",
+    "album_id": "bc-album-162340413",
+    "genre": "jazz",
+    "bandcamp_url": "https://justinallanarnold.bandcamp.com/track/new-york-november-2",
+    "compilation_id": "bc-compilation-162340413",
+    "bandcamp_track_id": 1626121828,
+    "source_kind": "bandcamp_cc",
+    "source_url": "https://justinallanarnold.bandcamp.com/track/new-york-november-2",
+    "license_url": "https://creativecommons.org/licenses/by/4.0/",
+    "license_name": "CC BY 4.0",
+    "audio_changes": "MP3 format conversion only",
+    "rights": "CC BY 4.0, published by Justin Allan Arnold / IFNESS on https://justinallanarnold.bandcamp.com/track/new-york-november-2; license verified again at acquisition.",
+    "attribution": "New York November by Justin Allan Arnold / IFNESS — Jazz - Royalty Free - Compilation. CC BY 4.0. Source: https://justinallanarnold.bandcamp.com/track/new-york-november-2. MP3 format conversion only."
+  },
+  {
+    "id": "bc-88307610",
+    "title": "Self-portrait in Three Shades of Blue",
+    "artists": [
+      "Justin Allan Arnold / IFNESS"
+    ],
+    "album": "Jazz - Royalty Free - Compilation",
+    "album_id": "bc-album-162340413",
+    "genre": "jazz",
+    "bandcamp_url": "https://justinallanarnold.bandcamp.com/track/self-portrait-in-three-shades-of-blue-2",
+    "compilation_id": "bc-compilation-162340413",
+    "bandcamp_track_id": 88307610,
+    "source_kind": "bandcamp_cc",
+    "source_url": "https://justinallanarnold.bandcamp.com/track/self-portrait-in-three-shades-of-blue-2",
+    "license_url": "https://creativecommons.org/licenses/by/4.0/",
+    "license_name": "CC BY 4.0",
+    "audio_changes": "MP3 format conversion only",
+    "rights": "CC BY 4.0, published by Justin Allan Arnold / IFNESS on https://justinallanarnold.bandcamp.com/track/self-portrait-in-three-shades-of-blue-2; license verified again at acquisition.",
+    "attribution": "Self-portrait in Three Shades of Blue by Justin Allan Arnold / IFNESS — Jazz - Royalty Free - Compilation. CC BY 4.0. Source: https://justinallanarnold.bandcamp.com/track/self-portrait-in-three-shades-of-blue-2. MP3 format conversion only."
+  },
+  {
+    "id": "bc-1622781482",
+    "title": "Construction",
+    "artists": [
+      "Alexander Nakarada"
+    ],
+    "album": "Collection - Metal & Rock",
+    "album_id": "bc-album-167461493",
+    "genre": "metal",
+    "bandcamp_url": "https://alexandernakarada.bandcamp.com/track/construction-3",
+    "compilation_id": null,
+    "bandcamp_track_id": 1622781482,
+    "source_kind": "bandcamp_cc",
+    "source_url": "https://alexandernakarada.bandcamp.com/track/construction-3",
+    "license_url": "https://creativecommons.org/licenses/by/4.0/",
+    "license_name": "CC BY 4.0",
+    "audio_changes": "MP3 format conversion only",
+    "rights": "CC BY 4.0, published by Alexander Nakarada on https://alexandernakarada.bandcamp.com/track/construction-3; license verified again at acquisition.",
+    "attribution": "Construction by Alexander Nakarada — Collection - Metal & Rock. CC BY 4.0. Source: https://alexandernakarada.bandcamp.com/track/construction-3. MP3 format conversion only."
+  },
+  {
+    "id": "bc-1304948808",
+    "title": "Cylinder One",
+    "artists": [
+      "Chris Zabriskie"
+    ],
+    "album": "Cylinders",
+    "album_id": "bc-album-1967145751",
+    "genre": "ambient",
+    "bandcamp_url": "https://chriszabriskie.bandcamp.com/track/cylinder-one",
+    "compilation_id": null,
+    "bandcamp_track_id": 1304948808,
+    "source_kind": "bandcamp_cc",
+    "source_url": "https://chriszabriskie.bandcamp.com/track/cylinder-one",
+    "license_url": "https://creativecommons.org/licenses/by/4.0/",
+    "license_name": "CC BY 4.0",
+    "audio_changes": "MP3 format conversion only",
+    "rights": "CC BY 4.0, published by Chris Zabriskie on https://chriszabriskie.bandcamp.com/track/cylinder-one; license verified again at acquisition.",
+    "attribution": "Cylinder One by Chris Zabriskie — Cylinders. CC BY 4.0. Source: https://chriszabriskie.bandcamp.com/track/cylinder-one. MP3 format conversion only."
+  },
+  {
+    "id": "bc-3833222260",
+    "title": "The Hunt Begins",
+    "artists": [
+      "Leonard Richter"
+    ],
+    "album": "The Hunt Begins",
+    "album_id": "bc-album-3833222260",
+    "genre": "orchestral",
+    "bandcamp_url": "https://leonardrichter.bandcamp.com/track/the-hunt-begins",
+    "compilation_id": null,
+    "bandcamp_track_id": 3833222260,
+    "source_kind": "bandcamp_cc",
+    "source_url": "https://leonardrichter.bandcamp.com/track/the-hunt-begins",
+    "license_url": "https://creativecommons.org/licenses/by/4.0/",
+    "license_name": "CC BY 4.0",
+    "audio_changes": "MP3 format conversion only",
+    "rights": "CC BY 4.0, published by Leonard Richter on https://leonardrichter.bandcamp.com/track/the-hunt-begins; license verified again at acquisition.",
+    "attribution": "The Hunt Begins by Leonard Richter — The Hunt Begins. CC BY 4.0. Source: https://leonardrichter.bandcamp.com/track/the-hunt-begins. MP3 format conversion only."
+  },
+  {
+    "id": "bc-3364722866",
+    "title": "Sunrise",
+    "artists": [
+      "Storm Maverick"
+    ],
+    "album": "Your Majesty (creative commons free EP)",
+    "album_id": "bc-album-2685897445",
+    "genre": "edm",
+    "bandcamp_url": "https://thelionrecords.bandcamp.com/track/sunrise",
+    "compilation_id": null,
+    "bandcamp_track_id": 3364722866,
+    "source_kind": "bandcamp_cc",
+    "source_url": "https://thelionrecords.bandcamp.com/track/sunrise",
+    "license_url": "https://creativecommons.org/licenses/by/4.0/",
+    "license_name": "CC BY 4.0",
+    "audio_changes": "MP3 format conversion only",
+    "rights": "CC BY 4.0, published by Storm Maverick on https://thelionrecords.bandcamp.com/track/sunrise; license verified again at acquisition.",
+    "attribution": "Sunrise by Storm Maverick — Your Majesty (creative commons free EP). CC BY 4.0. Source: https://thelionrecords.bandcamp.com/track/sunrise. MP3 format conversion only."
+  },
+  {
+    "id": "bc-3576761464",
+    "title": "Your Majesty",
+    "artists": [
+      "Storm Maverick"
+    ],
+    "album": "Your Majesty (creative commons free EP)",
+    "album_id": "bc-album-2685897445",
+    "genre": "edm",
+    "bandcamp_url": "https://thelionrecords.bandcamp.com/track/your-majesty-2",
+    "compilation_id": null,
+    "bandcamp_track_id": 3576761464,
+    "source_kind": "bandcamp_cc",
+    "source_url": "https://thelionrecords.bandcamp.com/track/your-majesty-2",
+    "license_url": "https://creativecommons.org/licenses/by/4.0/",
+    "license_name": "CC BY 4.0",
+    "audio_changes": "MP3 format conversion only",
+    "rights": "CC BY 4.0, published by Storm Maverick on https://thelionrecords.bandcamp.com/track/your-majesty-2; license verified again at acquisition.",
+    "attribution": "Your Majesty by Storm Maverick — Your Majesty (creative commons free EP). CC BY 4.0. Source: https://thelionrecords.bandcamp.com/track/your-majesty-2. MP3 format conversion only."
+  },
+  {
+    "id": "bc-177181955",
+    "title": "Believe In Yourself",
+    "artists": [
+      "Storm Maverick"
+    ],
+    "album": "Your Majesty (creative commons free EP)",
+    "album_id": "bc-album-2685897445",
+    "genre": "edm",
+    "bandcamp_url": "https://thelionrecords.bandcamp.com/track/believe-in-yourself-2",
+    "compilation_id": null,
+    "bandcamp_track_id": 177181955,
+    "source_kind": "bandcamp_cc",
+    "source_url": "https://thelionrecords.bandcamp.com/track/believe-in-yourself-2",
+    "license_url": "https://creativecommons.org/licenses/by/4.0/",
+    "license_name": "CC BY 4.0",
+    "audio_changes": "MP3 format conversion only",
+    "rights": "CC BY 4.0, published by Storm Maverick on https://thelionrecords.bandcamp.com/track/believe-in-yourself-2; license verified again at acquisition.",
+    "attribution": "Believe In Yourself by Storm Maverick — Your Majesty (creative commons free EP). CC BY 4.0. Source: https://thelionrecords.bandcamp.com/track/believe-in-yourself-2. MP3 format conversion only."
+  },
+  {
+    "id": "bc-2256018289",
+    "title": "Milky Way",
+    "artists": [
+      "Storm Maverick"
+    ],
+    "album": "Your Majesty (creative commons free EP)",
+    "album_id": "bc-album-2685897445",
+    "genre": "edm",
+    "bandcamp_url": "https://thelionrecords.bandcamp.com/track/milky-way",
+    "compilation_id": null,
+    "bandcamp_track_id": 2256018289,
+    "source_kind": "bandcamp_cc",
+    "source_url": "https://thelionrecords.bandcamp.com/track/milky-way",
+    "license_url": "https://creativecommons.org/licenses/by/4.0/",
+    "license_name": "CC BY 4.0",
+    "audio_changes": "MP3 format conversion only",
+    "rights": "CC BY 4.0, published by Storm Maverick on https://thelionrecords.bandcamp.com/track/milky-way; license verified again at acquisition.",
+    "attribution": "Milky Way by Storm Maverick — Your Majesty (creative commons free EP). CC BY 4.0. Source: https://thelionrecords.bandcamp.com/track/milky-way. MP3 format conversion only."
+  },
+  {
+    "id": "bc-2314276466",
+    "title": "Palmer's Gate (ver 2) - alto whistle, guitar, bodhran, shruti box",
+    "artists": [
+      "Dan Whalen"
+    ],
+    "album": "One Man Band",
+    "album_id": "bc-album-3906000037",
+    "genre": "folk",
+    "bandcamp_url": "https://danwhalen.bandcamp.com/track/palmers-gate-ver-2-alto-whistle-guitar-bodhran-shruti-box",
+    "compilation_id": null,
+    "bandcamp_track_id": 2314276466,
+    "source_kind": "bandcamp_cc",
+    "source_url": "https://danwhalen.bandcamp.com/track/palmers-gate-ver-2-alto-whistle-guitar-bodhran-shruti-box",
+    "license_url": "https://creativecommons.org/licenses/by/4.0/",
+    "license_name": "CC BY 4.0",
+    "audio_changes": "MP3 format conversion only",
+    "rights": "CC BY 4.0, published by Dan Whalen on https://danwhalen.bandcamp.com/track/palmers-gate-ver-2-alto-whistle-guitar-bodhran-shruti-box; license verified again at acquisition.",
+    "attribution": "Palmer's Gate (ver 2) - alto whistle, guitar, bodhran, shruti box by Dan Whalen — One Man Band. CC BY 4.0. Source: https://danwhalen.bandcamp.com/track/palmers-gate-ver-2-alto-whistle-guitar-bodhran-shruti-box. MP3 format conversion only."
+  },
+  {
+    "id": "bc-1128058191",
+    "title": "Palmer's Gate (ver 1) - pennywhistle, banjolele, bodhran, bones, tambourine",
+    "artists": [
+      "Dan Whalen"
+    ],
+    "album": "One Man Band",
+    "album_id": "bc-album-3906000037",
+    "genre": "folk",
+    "bandcamp_url": "https://danwhalen.bandcamp.com/track/palmers-gate-ver-1-pennywhistle-banjolele-bodhran-bones-tambourine",
+    "compilation_id": null,
+    "bandcamp_track_id": 1128058191,
+    "source_kind": "bandcamp_cc",
+    "source_url": "https://danwhalen.bandcamp.com/track/palmers-gate-ver-1-pennywhistle-banjolele-bodhran-bones-tambourine",
+    "license_url": "https://creativecommons.org/licenses/by/4.0/",
+    "license_name": "CC BY 4.0",
+    "audio_changes": "MP3 format conversion only",
+    "rights": "CC BY 4.0, published by Dan Whalen on https://danwhalen.bandcamp.com/track/palmers-gate-ver-1-pennywhistle-banjolele-bodhran-bones-tambourine; license verified again at acquisition.",
+    "attribution": "Palmer's Gate (ver 1) - pennywhistle, banjolele, bodhran, bones, tambourine by Dan Whalen — One Man Band. CC BY 4.0. Source: https://danwhalen.bandcamp.com/track/palmers-gate-ver-1-pennywhistle-banjolele-bodhran-bones-tambourine. MP3 format conversion only."
+  },
+  {
+    "id": "bc-1961977904",
+    "title": "The Kesh - pennywhistle, low whistle, guitar",
+    "artists": [
+      "Dan Whalen"
+    ],
+    "album": "One Man Band",
+    "album_id": "bc-album-3906000037",
+    "genre": "folk",
+    "bandcamp_url": "https://danwhalen.bandcamp.com/track/the-kesh-pennywhistle-low-whistle-guitar",
+    "compilation_id": null,
+    "bandcamp_track_id": 1961977904,
+    "source_kind": "bandcamp_cc",
+    "source_url": "https://danwhalen.bandcamp.com/track/the-kesh-pennywhistle-low-whistle-guitar",
+    "license_url": "https://creativecommons.org/licenses/by/4.0/",
+    "license_name": "CC BY 4.0",
+    "audio_changes": "MP3 format conversion only",
+    "rights": "CC BY 4.0, published by Dan Whalen on https://danwhalen.bandcamp.com/track/the-kesh-pennywhistle-low-whistle-guitar; license verified again at acquisition.",
+    "attribution": "The Kesh - pennywhistle, low whistle, guitar by Dan Whalen — One Man Band. CC BY 4.0. Source: https://danwhalen.bandcamp.com/track/the-kesh-pennywhistle-low-whistle-guitar. MP3 format conversion only."
+  },
+  {
+    "id": "bc-3886587791",
+    "title": "The Foggy Dew - pennywhistle, guitar",
+    "artists": [
+      "Dan Whalen"
+    ],
+    "album": "One Man Band",
+    "album_id": "bc-album-3906000037",
+    "genre": "folk",
+    "bandcamp_url": "https://danwhalen.bandcamp.com/track/the-foggy-dew-pennywhistle-guitar",
+    "compilation_id": null,
+    "bandcamp_track_id": 3886587791,
+    "source_kind": "bandcamp_cc",
+    "source_url": "https://danwhalen.bandcamp.com/track/the-foggy-dew-pennywhistle-guitar",
+    "license_url": "https://creativecommons.org/licenses/by/4.0/",
+    "license_name": "CC BY 4.0",
+    "audio_changes": "MP3 format conversion only",
+    "rights": "CC BY 4.0, published by Dan Whalen on https://danwhalen.bandcamp.com/track/the-foggy-dew-pennywhistle-guitar; license verified again at acquisition.",
+    "attribution": "The Foggy Dew - pennywhistle, guitar by Dan Whalen — One Man Band. CC BY 4.0. Source: https://danwhalen.bandcamp.com/track/the-foggy-dew-pennywhistle-guitar. MP3 format conversion only."
+  },
+  {
+    "id": "bc-2909899091",
+    "title": "Calm The Fuck Down",
+    "artists": [
+      "Broke For Free"
+    ],
+    "album": "Slam Funk",
+    "album_id": "bc-album-2331922485",
+    "genre": "funk",
+    "bandcamp_url": "https://brokeforfree.bandcamp.com/track/calm-the-fuck-down",
+    "compilation_id": null,
+    "bandcamp_track_id": 2909899091,
+    "source_kind": "bandcamp_cc",
+    "source_url": "https://brokeforfree.bandcamp.com/track/calm-the-fuck-down",
+    "license_url": "https://creativecommons.org/licenses/by/4.0/",
+    "license_name": "CC BY 4.0",
+    "audio_changes": "MP3 format conversion only",
+    "rights": "CC BY 4.0, published by Broke For Free on https://brokeforfree.bandcamp.com/track/calm-the-fuck-down; license verified again at acquisition.",
+    "attribution": "Calm The Fuck Down by Broke For Free — Slam Funk. CC BY 4.0. Source: https://brokeforfree.bandcamp.com/track/calm-the-fuck-down. MP3 format conversion only."
+  },
+  {
+    "id": "bc-2068482322",
+    "title": "Simple Hop",
+    "artists": [
+      "Broke For Free"
+    ],
+    "album": "Slam Funk",
+    "album_id": "bc-album-2331922485",
+    "genre": "funk",
+    "bandcamp_url": "https://brokeforfree.bandcamp.com/track/simple-hop",
+    "compilation_id": null,
+    "bandcamp_track_id": 2068482322,
+    "source_kind": "bandcamp_cc",
+    "source_url": "https://brokeforfree.bandcamp.com/track/simple-hop",
+    "license_url": "https://creativecommons.org/licenses/by/4.0/",
+    "license_name": "CC BY 4.0",
+    "audio_changes": "MP3 format conversion only",
+    "rights": "CC BY 4.0, published by Broke For Free on https://brokeforfree.bandcamp.com/track/simple-hop; license verified again at acquisition.",
+    "attribution": "Simple Hop by Broke For Free — Slam Funk. CC BY 4.0. Source: https://brokeforfree.bandcamp.com/track/simple-hop. MP3 format conversion only."
+  },
+  {
+    "id": "bc-2991468018",
+    "title": "Caught In The Beat",
+    "artists": [
+      "Broke For Free"
+    ],
+    "album": "Slam Funk",
+    "album_id": "bc-album-2331922485",
+    "genre": "funk",
+    "bandcamp_url": "https://brokeforfree.bandcamp.com/track/caught-in-the-beat",
+    "compilation_id": null,
+    "bandcamp_track_id": 2991468018,
+    "source_kind": "bandcamp_cc",
+    "source_url": "https://brokeforfree.bandcamp.com/track/caught-in-the-beat",
+    "license_url": "https://creativecommons.org/licenses/by/4.0/",
+    "license_name": "CC BY 4.0",
+    "audio_changes": "MP3 format conversion only",
+    "rights": "CC BY 4.0, published by Broke For Free on https://brokeforfree.bandcamp.com/track/caught-in-the-beat; license verified again at acquisition.",
+    "attribution": "Caught In The Beat by Broke For Free — Slam Funk. CC BY 4.0. Source: https://brokeforfree.bandcamp.com/track/caught-in-the-beat. MP3 format conversion only."
+  },
+  {
+    "id": "bc-762226831",
+    "title": "Drop of Water In the Ocean",
+    "artists": [
+      "Broke For Free"
+    ],
+    "album": "Slam Funk",
+    "album_id": "bc-album-2331922485",
+    "genre": "funk",
+    "bandcamp_url": "https://brokeforfree.bandcamp.com/track/drop-of-water-in-the-ocean",
+    "compilation_id": null,
+    "bandcamp_track_id": 762226831,
+    "source_kind": "bandcamp_cc",
+    "source_url": "https://brokeforfree.bandcamp.com/track/drop-of-water-in-the-ocean",
+    "license_url": "https://creativecommons.org/licenses/by/4.0/",
+    "license_name": "CC BY 4.0",
+    "audio_changes": "MP3 format conversion only",
+    "rights": "CC BY 4.0, published by Broke For Free on https://brokeforfree.bandcamp.com/track/drop-of-water-in-the-ocean; license verified again at acquisition.",
+    "attribution": "Drop of Water In the Ocean by Broke For Free — Slam Funk. CC BY 4.0. Source: https://brokeforfree.bandcamp.com/track/drop-of-water-in-the-ocean. MP3 format conversion only."
+  },
+  {
+    "id": "bc-2662871358",
+    "title": "this",
+    "artists": [
+      "Tryad"
+    ],
+    "album": "Listen",
+    "album_id": "bc-album-249581192",
+    "genre": "trip-hop",
+    "bandcamp_url": "https://tryad.bandcamp.com/track/this",
+    "compilation_id": null,
+    "bandcamp_track_id": 2662871358,
+    "source_kind": "bandcamp_cc",
+    "source_url": "https://tryad.bandcamp.com/track/this",
+    "license_url": "https://creativecommons.org/licenses/by-sa/4.0/",
+    "license_name": "CC BY-SA 4.0",
+    "audio_changes": "MP3 format conversion only",
+    "rights": "CC BY-SA 4.0, published by Tryad on https://tryad.bandcamp.com/track/this; license verified again at acquisition.",
+    "attribution": "this by Tryad — Listen. CC BY-SA 4.0. Source: https://tryad.bandcamp.com/track/this. MP3 format conversion only."
+  },
+  {
+    "id": "bc-1921375545",
+    "title": "you are god",
+    "artists": [
+      "Tryad"
+    ],
+    "album": "Listen",
+    "album_id": "bc-album-249581192",
+    "genre": "trip-hop",
+    "bandcamp_url": "https://tryad.bandcamp.com/track/you-are-god",
+    "compilation_id": null,
+    "bandcamp_track_id": 1921375545,
+    "source_kind": "bandcamp_cc",
+    "source_url": "https://tryad.bandcamp.com/track/you-are-god",
+    "license_url": "https://creativecommons.org/licenses/by-sa/4.0/",
+    "license_name": "CC BY-SA 4.0",
+    "audio_changes": "MP3 format conversion only",
+    "rights": "CC BY-SA 4.0, published by Tryad on https://tryad.bandcamp.com/track/you-are-god; license verified again at acquisition.",
+    "attribution": "you are god by Tryad — Listen. CC BY-SA 4.0. Source: https://tryad.bandcamp.com/track/you-are-god. MP3 format conversion only."
+  },
+  {
+    "id": "bc-1765132874",
+    "title": "alone",
+    "artists": [
+      "Tryad"
+    ],
+    "album": "Listen",
+    "album_id": "bc-album-249581192",
+    "genre": "trip-hop",
+    "bandcamp_url": "https://tryad.bandcamp.com/track/alone",
+    "compilation_id": null,
+    "bandcamp_track_id": 1765132874,
+    "source_kind": "bandcamp_cc",
+    "source_url": "https://tryad.bandcamp.com/track/alone",
+    "license_url": "https://creativecommons.org/licenses/by-sa/4.0/",
+    "license_name": "CC BY-SA 4.0",
+    "audio_changes": "MP3 format conversion only",
+    "rights": "CC BY-SA 4.0, published by Tryad on https://tryad.bandcamp.com/track/alone; license verified again at acquisition.",
+    "attribution": "alone by Tryad — Listen. CC BY-SA 4.0. Source: https://tryad.bandcamp.com/track/alone. MP3 format conversion only."
+  },
+  {
+    "id": "bc-1183710369",
+    "title": "listen",
+    "artists": [
+      "Tryad"
+    ],
+    "album": "Listen",
+    "album_id": "bc-album-249581192",
+    "genre": "trip-hop",
+    "bandcamp_url": "https://tryad.bandcamp.com/track/listen",
+    "compilation_id": null,
+    "bandcamp_track_id": 1183710369,
+    "source_kind": "bandcamp_cc",
+    "source_url": "https://tryad.bandcamp.com/track/listen",
+    "license_url": "https://creativecommons.org/licenses/by-sa/4.0/",
+    "license_name": "CC BY-SA 4.0",
+    "audio_changes": "MP3 format conversion only",
+    "rights": "CC BY-SA 4.0, published by Tryad on https://tryad.bandcamp.com/track/listen; license verified again at acquisition.",
+    "attribution": "listen by Tryad — Listen. CC BY-SA 4.0. Source: https://tryad.bandcamp.com/track/listen. MP3 format conversion only."
+  }
+]

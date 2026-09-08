@@ -1,0 +1,158 @@
+[
+  {
+    "id": "dreamstate-topography",
+    "title": "Ambient Topography One",
+    "artists": [
+      "dreamSTATE"
+    ],
+    "album": "Ambient Topography One",
+    "album_id": "dreamstate:ambient topography one",
+    "genre": "ambient",
+    "bandcamp_url": "https://dreamstate.bandcamp.com/track/ambient-topography-one",
+    "compilation_id": null
+  },
+  {
+    "id": "nate-ambient-loop",
+    "title": "Ambient Loop 2",
+    "artists": [
+      "Nate Tatem"
+    ],
+    "album": "Ambient Loop 2",
+    "album_id": "nate tatem:ambient loop 2",
+    "genre": "ambient",
+    "bandcamp_url": "https://n8t8m.bandcamp.com/track/ambient-loop-2",
+    "compilation_id": null
+  },
+  {
+    "id": "other-galaxies-punk",
+    "title": "Punk is Dead",
+    "artists": [
+      "Other Galaxies"
+    ],
+    "album": "Punk is Dead",
+    "album_id": "other galaxies:punk is dead",
+    "genre": "punk",
+    "bandcamp_url": "https://othergalaxies.bandcamp.com/track/punk-is-dead-2",
+    "compilation_id": null
+  },
+  {
+    "id": "james-soul",
+    "title": "Soul",
+    "artists": [
+      "James Alexander Bright"
+    ],
+    "album": "Soul",
+    "album_id": "james alexander bright:soul",
+    "genre": "soul",
+    "bandcamp_url": "https://jamesalexanderbright.bandcamp.com/track/soul",
+    "compilation_id": null
+  },
+  {
+    "id": "ink-folk",
+    "title": "Folk Song",
+    "artists": [
+      "INK."
+    ],
+    "album": "Folk Song",
+    "album_id": "ink.:folk song",
+    "genre": "folk",
+    "bandcamp_url": "https://ink-official.bandcamp.com/track/folk-song",
+    "compilation_id": null
+  },
+  {
+    "id": "folk-trio-analogue",
+    "title": "Analogue",
+    "artists": [
+      "Folk Bitch Trio"
+    ],
+    "album": "Analogue",
+    "album_id": "folk bitch trio:analogue",
+    "genre": "folk",
+    "bandcamp_url": "https://folkbitchtrio.bandcamp.com/track/analogue",
+    "compilation_id": null
+  },
+  {
+    "id": "luke-torped",
+    "title": "Torped",
+    "artists": [
+      "Luke Colborn"
+    ],
+    "album": "Torped",
+    "album_id": "luke colborn:torped",
+    "genre": "techno",
+    "bandcamp_url": "https://techno.bandcamp.com/track/torped",
+    "compilation_id": null
+  },
+  {
+    "id": "wreckless-estimate",
+    "title": "Estimate (Techno)",
+    "artists": [
+      "Wreckless"
+    ],
+    "album": "Estimate (Techno)",
+    "album_id": "wreckless:estimate (techno)",
+    "genre": "techno",
+    "bandcamp_url": "https://wrecklessdnb.bandcamp.com/track/estimate-techno",
+    "compilation_id": null
+  },
+  {
+    "id": "nubya-pace",
+    "title": "Pace",
+    "artists": [
+      "Nubya Garcia"
+    ],
+    "album": "SOURCE",
+    "album_id": "nubya garcia:source",
+    "genre": "jazz",
+    "bandcamp_url": "https://nubyagarcia.bandcamp.com/album/source",
+    "compilation_id": null
+  },
+  {
+    "id": "kokoroko-adwa",
+    "title": "Adwa",
+    "artists": [
+      "Kokoroko"
+    ],
+    "album": "KOKOROKO",
+    "album_id": "kokoroko:kokoroko",
+    "genre": "afrobeat",
+    "bandcamp_url": "https://kokoroko.bandcamp.com/album/kokoroko",
+    "compilation_id": null
+  },
+  {
+    "id": "bonobo-kerala",
+    "title": "Kerala",
+    "artists": [
+      "Bonobo"
+    ],
+    "album": "Migration",
+    "album_id": "bonobo:migration",
+    "genre": "electronica",
+    "bandcamp_url": "https://bonobomusic.bandcamp.com/track/kerala",
+    "compilation_id": null
+  },
+  {
+    "id": "xtricks-enigma",
+    "title": "Enigma - Hip Hop Instrumental",
+    "artists": [
+      "The X & Tricks"
+    ],
+    "album": "Enigma - Hip Hop Instrumental",
+    "album_id": "the x & tricks:enigma - hip hop instrumental",
+    "genre": "hip-hop",
+    "bandcamp_url": "https://thexandtricks.bandcamp.com/track/enigma-hip-hop-instrumental",
+    "compilation_id": null
+  },
+  {
+    "id": "summa-tides",
+    "title": "Tides of Doom",
+    "artists": [
+      "SUMMA"
+    ],
+    "album": "Tides of Doom",
+    "album_id": "summa:tides of doom",
+    "genre": "doom metal",
+    "bandcamp_url": "https://summadoom.bandcamp.com/track/tides-of-doom",
+    "compilation_id": null
+  }
+]

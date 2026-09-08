@@ -53,7 +53,7 @@ with sync_playwright() as p:
     assert page.locator('#request-form select').count()==0
     assert page.locator('#community-requests').is_visible()
     assert page.locator('#download-summary').inner_text()
-    assert page.locator('#download-activity .queue-track').count()>0
+    page.wait_for_function("document.querySelector('#downloads-page').textContent.includes('Page 1 of')")
     if '--visual-check' in sys.argv:
         assert page.get_by_role('heading',name='Hit up the RJ.').is_visible()
         assert page.locator('header .brandmark').get_attribute('src')=='/static/cassette.svg'

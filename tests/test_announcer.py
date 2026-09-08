@@ -27,7 +27,11 @@ def test_unsupported_evidence_is_not_announced(metadata,monkeypatch):
     assert 'Grammy' not in announcer.script(metadata,{'artist_about':'Independent musician.'})
 
 
-def test_speech_request_cached_and_not_a_music_download(metadata,monkeypatch):
+@pytest.mark.parametrize('has_track',[False,True])
+def test_speech_request_cached_and_not_a_music_download(metadata,monkeypatch,has_track):
+    if has_track:
+        with db.transaction() as c:
+            c.execute('INSERT INTO tracks(id,metadata) VALUES(?,?)',(metadata['id'],json.dumps(metadata)))
     monkeypatch.setenv('OPENAI_API_KEY','test-key')
     monkeypatch.setattr(announcer,'page_details',lambda m:{})
     calls=[]
@@ -46,7 +50,9 @@ def test_speech_request_cached_and_not_a_music_download(metadata,monkeypatch):
     assert announcer.prepare(metadata)==first and len(calls)==1
     assert calls[0]['voice']=='onyx' and 'male radio announcer' in calls[0]['instructions']
     with db.connect() as c:
-        assert c.execute('SELECT COUNT(*) FROM tracks').fetchone()[0]==0
+        assert c.execute('SELECT COUNT(*) FROM tracks').fetchone()[0]==int(has_track)
+        if has_track:
+            assert c.execute('SELECT intro_id FROM tracks').fetchone()[0]==first['id']
 
 
 def test_music_clock_starts_after_intro(metadata,playing,monkeypatch):
@@ -104,3 +110,41 @@ def test_prepared_intro_matches_request_context(metadata,monkeypatch):
     assert station.ready_intro(candidate,warm)=={'script':'Requested song'}
     candidate.pop('request_id')
     assert station.ready_intro(candidate,warm) is None
+
+
+def test_persistent_intro_adopts_old_cache_and_survives_config_change(metadata,monkeypatch,tmp_path):
+    path=tmp_path/'intro.mp3';path.write_bytes(b'audio')
+    key=announcer.cache_key(metadata)
+    with db.transaction() as c:
+        c.execute('INSERT INTO tracks(id,metadata) VALUES(?,?)',(metadata['id'],json.dumps(metadata)))
+        c.execute('INSERT INTO announcements VALUES(?,?,?,?,?,?,?,?)',(key,metadata['id'],'Saved intro','{}',str(path),12,1,'onyx'))
+    assert announcer.cached(metadata)['script']=='Saved intro'
+    with db.connect() as c:
+        assert c.execute('SELECT intro_id FROM tracks').fetchone()[0]==key
+        assert c.execute('SELECT requested_intro_id FROM tracks').fetchone()[0] is None
+    monkeypatch.setenv('ANNOUNCER_VOICE','different')
+    assert announcer.cached(metadata)['id']==key
+    assert announcer.cached(metadata,requested=True) is None
+    path.unlink()
+    assert announcer.cached(metadata) is None
+
+
+def test_queue_preparation_skips_cached_and_cooldown_and_follows_requests(metadata,monkeypatch):
+    monkeypatch.setattr(announcer,'enabled',lambda:True)
+    metas=[{**metadata,'id':str(n),'artists':[str(n)],'album_id':str(n)} for n in range(12)]
+    with db.transaction() as c:
+        for meta in metas:
+            c.execute("INSERT INTO tracks(id,metadata,status,duration) VALUES(?,?,'ready',100)",(meta['id'],json.dumps(meta)))
+            c.execute('INSERT INTO playlist(track_id) VALUES(?)',(meta['id'],))
+        db.set_setting(c,'announcement-retry:'+announcer.cache_key(metas[1]),time.time()+300)
+    monkeypatch.setattr(announcer,'cached',lambda m,requested=False: {'id':'saved'} if m['id']=='0' else None)
+    calls=[]
+    monkeypatch.setattr(announcer,'prepare',lambda m,requested=False:calls.append((m['id'],requested)))
+    assert announcer.prepare_upcoming_once()=='2'
+    assert calls==[('2',False)]
+    with db.transaction() as c:
+        c.execute("INSERT INTO requests(id,listener,query,mode,response,track_id,status,created) VALUES('new','listener','','track','','11','pending',0)")
+    assert announcer.prepare_upcoming_once()=='11'
+    assert calls[-1]==('11',True)
+    monkeypatch.setattr(announcer,'cached',lambda *a,**k:{'id':'saved'})
+    assert announcer.prepare_upcoming_once() is None

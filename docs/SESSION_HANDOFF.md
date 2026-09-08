@@ -11,7 +11,7 @@ cookies, or raw private listener conversations in this document.
 - GitHub: private repository https://github.com/lotusbaba/radioworkx ; branch `main`.
 - Current public site: https://radioworkx.tail060b33.ts.net/ . No Tailscale client required for visitors.
 - Admin: same origin, `/admin`; username `admin`, password stored locally in ignored `.admin-credentials` and `.env`.
-- Latest application tests: **107 passed**. Public browser smoke with audio passed after the playback fix and hostname change.
+- Latest application tests: **110 passed**. Public browser smoke with audio passed after the playback fix and hostname change.
 - Last completed request before saving: explain why renaming MagicDNS required reapplying Funnel. The answer is below.
 - No known unfinished feature request at handoff. Live state changes; do not assume old track names, counters, or worker states remain current.
 - User prefers implementing fixes directly, preserving earlier requirements, and avoiding repeated confirmation. Never expose credentials. Use approval escalation if a needed operation is blocked by the sandbox.
@@ -136,8 +136,10 @@ For future renames check actual status instead of assuming automatic route migra
   when available; do not invent facts from page text. Evidence validation for facts.
 - Say “requested” only for the actual queued request being transmitted, not a later
   automatic replay of a previously requested recording. Cache key includes request context.
-- Announcements cached on disk/SQLite; prewarm upcoming introduction in a background
-  executor. Current implementation uses only cached/finished speech at track boundary;
+- Announcements persist via `tracks.intro_id` / `tracks.requested_intro_id` references
+  to the script/audio-path row in `announcements`, with no expiry. A background thread
+  continuously checks the next-ten forecast and generates the first missing intro,
+  rechecking after each job with a two-second interval. Existing cache is adopted. Current implementation uses only cached/finished speech at track boundary;
   skip unready speech rather than hold music. Next candidate is rechecked atomically.
 - Announcer time is separate from music time; reaction/playback clocks start with music.
 - ffmpeg streams MP3 in real time; 2048-byte Redis chunks, max ~160 stream entries.
@@ -287,3 +289,16 @@ Repository was created private and pushed to GitHub during this session. Git ign
 `.env`, `.admin-credentials`, `.venv`, caches, `data/`, egg-info. Initial staged source
 scan found no embedded actual env secrets or provider-token patterns. Runtime SQLite,
 S3/audio/video, local credentials, and full chat transcript were not committed.
+
+
+## Latest update: persistent intros from the up-next queue (2026-09-08)
+
+Supersedes the previous one-prediction-per-track and seven-day expiry behavior.
+`announcer.prepare_upcoming_once()` scans the shared next-ten forecast, reusing
+track-linked intros and skipping retry cooldowns before generating one missing
+variant. The station runs this in its own background thread during music. Generated
+rows are linked to `tracks.intro_id` or `tracks.requested_intro_id` atomically.
+Playback never waits for generation. Existing matching audio is adopted on lookup;
+no age expiry or automatic regeneration on voice/model changes. Missing audio can
+be regenerated. Source tests cover persistent reuse, variant isolation, legacy
+adoption, new track references, cooldown fairness and newly arriving requests.

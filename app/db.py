@@ -69,6 +69,9 @@ def init():
         c.execute("PRAGMA journal_mode=WAL")
         c.executescript(SCHEMA)
     with transaction() as c:
+        for column in ('intro_id','requested_intro_id'):
+            if column not in {row['name'] for row in c.execute('PRAGMA table_info(tracks)')}:
+                c.execute(f'ALTER TABLE tracks ADD COLUMN {column} TEXT REFERENCES announcements(id)')
         if 'suggestions' not in {row['name'] for row in c.execute('PRAGMA table_info(requests)')}:
             c.execute("ALTER TABLE requests ADD COLUMN suggestions TEXT NOT NULL DEFAULT '[]'")
         for name, default in [('sources', '[]'), ('engine', 'basic'), ('requested_genre', '')]:

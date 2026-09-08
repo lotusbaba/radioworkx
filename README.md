@@ -419,14 +419,21 @@ the artist, track, and album. No arbitrary model-supplied URLs are fetched.
 Speech is normalized to the station's MP3 format and broadcast on the same shared
 `/api/live` stream before music, so all tuned-in listeners hear the same announcer.
 Track reactions and the music clock begin after the introduction finishes. The
-station pre-generates the predicted next introduction during the current song and
-rechecks its selection after preparation, so a changed queue cannot cause an
-introduction for the wrong track. A new or changed selection may briefly wait for
-speech preparation. Generation or speech playback failure falls through to music.
+station has one background worker that rechecks the next-ten forecast every two
+seconds between jobs and prepares the first missing introduction in queue order.
+It rechecks after each generation, so new listener requests are picked up without
+waiting for the current song to end. Playback only uses saved, ready speech and
+never waits for generation; unavailable speech falls through to music.
 
-Generated introductions are cached separately from music for seven days, keyed by
-track metadata, voice, and speech model. Failed generation has a five-minute retry
-cooldown. These files do not count toward the 10,000 downloaded music tracks and
+Tracks have persistent `intro_id` and `requested_intro_id` columns referencing the
+`announcements` row containing the script, page details, voice, duration, and audio
+file path. Normal and listener-requested variants remain separate. Saved speech
+has no age expiry and is reused even after voice/model configuration changes.
+Existing matching cached recordings are adopted into these columns without a new
+provider call. Generate only when no usable saved intro exists (including a missing
+audio file). Failed generation has a five-minute retry cooldown; other queued
+tracks can prepare during that cooldown. These files do not count toward the
+10,000 downloaded music tracks and
 never enter the music playlist. Catalog metadata, page details, and scripts are sent
 to OpenAI for generation; text Responses calls use `store:false`.
 

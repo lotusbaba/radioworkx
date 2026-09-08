@@ -117,10 +117,15 @@ def cache_key(meta, requested=False):
 
 def cached(meta, requested=False):
     key = cache_key(meta, requested)
+    column='requested_intro_id' if requested else 'intro_id'
     with db.connect() as c:
+        row=c.execute(f'SELECT a.* FROM tracks t JOIN announcements a ON a.id=t.{column} WHERE t.id=?',(meta['id'],)).fetchone()
+        if row and Path(row['path']).is_file():return dict(row)
+        # Adopt existing speech on upgrade; age alone never requires regeneration.
         row = c.execute('SELECT * FROM announcements WHERE id=?',(key,)).fetchone()
-    if row and row['created']>time.time()-7*86400 and Path(row['path']).is_file():
-        return dict(row)
+        if row and Path(row['path']).is_file():
+            c.execute(f'UPDATE tracks SET {column}=? WHERE id=?',(row['id'],meta['id']))
+            return dict(row)
     return None
 
 
@@ -159,6 +164,8 @@ def prepare(meta, requested=False):
         with db.transaction() as c:
             c.execute('INSERT OR REPLACE INTO announcements VALUES(?,?,?,?,?,?,?,?)',
                       (key,meta['id'],text,json.dumps(details),str(final),duration,time.time(),os.getenv('ANNOUNCER_VOICE','onyx')))
+            column='requested_intro_id' if requested else 'intro_id'
+            c.execute(f'UPDATE tracks SET {column}=? WHERE id=?',(key,meta['id']))
         return cached(meta,requested)
     except Exception as error:
         log.warning('Introduction unavailable for %s: %s',meta['id'],type(error).__name__)
@@ -166,6 +173,32 @@ def prepare(meta, requested=False):
     finally:
         raw.unlink(missing_ok=True)
         temporary.unlink(missing_ok=True)
+
+
+def prepare_upcoming_once():
+    """Prepare the first missing intro in the live next-ten forecast, then recheck it."""
+    if not enabled():return None
+    from app.scheduling import preview
+    from app.service import now_playing
+    now=time.time()
+    with db.connect() as c:
+        play=now_playing(c,now)
+        announcement=on_air(c,now)
+        if announcement:
+            reserved=c.execute('SELECT ends FROM plays WHERE id=?',(announcement['play_id'],)).fetchone()
+            at=reserved['ends'] if reserved else now
+        else:at=play['ends'] if play else now
+        history=[dict(p,metadata=json.loads(p['metadata'])) for p in c.execute('SELECT * FROM plays ORDER BY starts')]
+        upcoming=preview(c,history,at,size=10)
+    for item in upcoming:
+        meta=item['metadata'];requested=item['selection']=='Listener request'
+        if cached(meta,requested):continue
+        with db.connect() as c:
+            retry=float(db.setting(c,'announcement-retry:'+cache_key(meta,requested),'0'))
+        if now<retry:continue
+        prepare(meta,requested)
+        return meta['id']
+    return None
 
 
 def on_air(c, now):

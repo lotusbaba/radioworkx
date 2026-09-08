@@ -133,15 +133,19 @@ def ready_intro(candidate, warm):
 
 
 def run():
-    from concurrent.futures import ThreadPoolExecutor
+    import threading
     from app import announcer
     with db.transaction() as c:
         c.execute('UPDATE plays SET actual_end=? WHERE actual_end IS NULL',(time.time(),))
         c.execute("UPDATE requests SET status='played' WHERE status='playing'")
         db.set_setting(c,'announcement_on_air','null')
     audio_redis.delete('radio:audio')
-    pool = ThreadPoolExecutor(max_workers=1,thread_name_prefix='announcer')
-    warm = None
+    def intro_loop():
+        while True:
+            try: announcer.prepare_upcoming_once()
+            except Exception: log.exception('Upcoming introduction preparation failed')
+            time.sleep(2)
+    threading.Thread(target=intro_loop,name='announcer-queue',daemon=True).start()
     while True:
         refill()
         candidate = peek()
@@ -149,7 +153,7 @@ def run():
             with db.transaction() as c: db.set_setting(c,'station_status','Waiting for eligible tracks')
             time.sleep(1)
             continue
-        intro = ready_intro(candidate,warm)
+        intro = ready_intro(candidate,None)
         selected = select_next(expected_track_id=candidate['id'],start_delay=intro['duration'] if intro else 0,expected_request_id=candidate.get('request_id'))
         if not selected: continue  # Queue changed during preparation: never introduce the wrong track.
         play,path = selected
@@ -170,9 +174,6 @@ def run():
                 except Exception: log.warning('Introduction playback failed; continuing with music')
             start_music(play)
             refill()
-            upcoming = peek(play['ends'])
-            if announcer.enabled() and upcoming and (not warm or warm[1].done()):
-                warm = ((upcoming['id'],upcoming.get('request_id')),pool.submit(announcer.prepare,upcoming['meta'],'request_id' in upcoming))
             transmit(path,bool(play['metadata'].get('demo')))
         except Exception:
             log.exception('Transmission interrupted')

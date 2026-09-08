@@ -69,8 +69,7 @@ function renderQueue(s){
   $('up-next').textContent=s.up_next ? `Up next: ${s.up_next.title} · ${s.up_next.artists.join(' & ')}` : 'Next track will appear when eligible audio is ready.';
   $('request-count').textContent=`${s.request_queue.length} REQUESTS`;
   $('request-queue').replaceChildren(...s.request_queue.map(queueItem));
-  $('community-requests').replaceChildren(...(s.community_requests||[]).map(queueItem));
-  if(!s.community_requests?.length)$('community-requests').append(node('p','No music requests yet.','empty'));
+  for(const pager of activityPagers)if(Date.now()-pager.lastRefresh>5000)pager.refresh();
   if(!s.request_queue.length)$('request-queue').append(node('p','No listener requests yet. Make the next discovery yours.','empty'));
   $('playlist').replaceChildren(...s.playlist.map(queueItem));
   if(s.playlist.length && s.playlist.length<10)$('playlist').append(node('p',`${s.playlist.length} distinct playable tracks forecast. Repeats are not used to fill this list. Downloading or policy-deferred requests appear in the request queue until ready.`,'empty'));
@@ -293,3 +292,29 @@ async function refreshDownloads(){
 }
 $('downloads-previous').onclick=()=>{if(downloadPage>1){downloadPage--;refreshDownloads();}};
 $('downloads-next').onclick=()=>{if(downloadPage<downloadPages){downloadPage++;refreshDownloads();}};
+
+
+function activityPager(prefix,container,endpoint,empty){
+  const pager={page:1,pages:1,lastRefresh:0,revision:0};
+  pager.refresh=async()=>{
+    pager.lastRefresh=Date.now();const revision=++pager.revision;
+    $(prefix+'-previous').disabled=true;$(prefix+'-next').disabled=true;
+    try{
+      const response=await fetch(`${endpoint}${endpoint.includes('?')?'&':'?'}page=${pager.page}&page_size=10`);
+      if(!response.ok)throw new Error();
+      const data=await response.json();if(revision!==pager.revision)return;
+      pager.page=data.page;pager.pages=data.pages;
+      $(container).replaceChildren(...data.items.map((entry,i)=>queueItem(entry,(data.page-1)*data.page_size+i)));
+      if(!data.items.length)$(container).append(node('p',empty,'empty'));
+      $(prefix+'-page').textContent=`Page ${data.page} of ${data.pages} · ${data.total.toLocaleString()} entries · Latest first`;
+    }catch{if(revision===pager.revision)$(prefix+'-page').textContent='Could not refresh activity. Retrying automatically.';}
+    finally{if(revision===pager.revision){$(prefix+'-previous').disabled=pager.page<=1;$(prefix+'-next').disabled=pager.page>=pager.pages;}}
+  };
+  $(prefix+'-previous').onclick=()=>{if(pager.page>1){pager.page--;pager.refresh();}};
+  $(prefix+'-next').onclick=()=>{if(pager.page<pager.pages){pager.page++;pager.refresh();}};
+  pager.refresh();return pager;
+}
+const activityPagers=[
+  activityPager('community','community-requests','/api/community-requests','No music requests yet.'),
+  activityPager('automatic','download-activity','/api/downloads?scope=automatic','No completed automatic acquisition activity yet.')
+];

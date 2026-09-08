@@ -92,11 +92,18 @@ def status():
                     server_time=time.time())
 
 @app.get('/api/downloads')
-def downloads_page(page: int=Query(1,ge=1,le=1000000),page_size: int=Query(10,ge=1,le=100)):
+def downloads_page(page: int=Query(1,ge=1,le=1000000),page_size: int=Query(10,ge=1,le=100),scope: Literal['all','automatic']='all'):
     from app.views import download_page
     with db.connect() as c:
         c.execute('BEGIN')
-        return download_page(c,page,page_size)
+        return download_page(c,page,page_size,automatic=scope=='automatic')
+
+@app.get('/api/community-requests')
+def community_requests_page(page: int=Query(1,ge=1,le=1000000),page_size: int=Query(10,ge=1,le=100)):
+    from app.views import community_request_page
+    with db.connect() as c:
+        c.execute('BEGIN')
+        return community_request_page(c,page,page_size)
 
 @app.get('/api/stats')
 def public_stats(response: Response, period: Literal['24h','7d','all']='7d'):

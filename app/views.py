@@ -122,7 +122,7 @@ def next_airtime(c, now):
     return None
 
 
-def download_page(c, page=1, page_size=10):
+def download_page(c, page=1, page_size=10, automatic=False):
     """Browse all acquisition jobs by latest track activity, independent of playback order."""
     query="""
     WITH entries AS (
@@ -145,10 +145,11 @@ def download_page(c, page=1, page_size=10):
       FROM entries
     ), visible AS (SELECT * FROM timed WHERE track_id IS NOT NULL OR diagnostic_rank=1)
     """
-    total=c.execute(query+'SELECT COUNT(*) FROM visible').fetchone()[0]
+    condition=" WHERE kind='refill' AND (completed OR done IS NOT NULL OR failed IS NOT NULL)" if automatic else ''
+    total=c.execute(query+'SELECT COUNT(*) FROM visible'+condition).fetchone()[0]
     pages=max(1,(total+page_size-1)//page_size)
     page=min(page,pages)
-    rows=c.execute(query+'SELECT * FROM visible ORDER BY updated_at DESC,job_id DESC,track_id DESC LIMIT ? OFFSET ?',
+    rows=c.execute(query+'SELECT * FROM visible'+condition+' ORDER BY updated_at DESC,job_id DESC,track_id DESC LIMIT ? OFFSET ?',
                    (page_size,(page-1)*page_size))
     items=[]
     for row in rows:
@@ -161,4 +162,17 @@ def download_page(c, page=1, page_size=10):
         items.append(dict(job_id=row['job_id'],metadata=json.loads(row['metadata']) if row['metadata'] else None,
                           kind=row['kind'],status=status,updated_at=row['updated_at'],
                           label=f"Requested genre: {row['genre']}" if row['genre'] else None))
+    return dict(items=items,total=total,page=page,pages=pages,page_size=page_size)
+
+
+def community_request_page(c, page=1, page_size=10):
+    source=' FROM requests r JOIN tracks t ON t.id=r.track_id WHERE r.track_id IS NOT NULL'
+    total=c.execute('SELECT COUNT(*)'+source).fetchone()[0]
+    pages=max(1,(total+page_size-1)//page_size)
+    page=min(page,pages)
+    rows=c.execute('SELECT r.id,r.listener,r.created,r.status,t.metadata'+source+
+                   ' ORDER BY r.created DESC,r.sequence DESC LIMIT ? OFFSET ?',(page_size,(page-1)*page_size))
+    items=[dict(request_id=row['id'],metadata=json.loads(row['metadata']),requested_at=row['created'],
+                requested_by='Listener '+hashlib.sha256(row['listener'].encode()).hexdigest()[:6],
+                status={'pending':'Queued','playing':'Now playing','played':'Played','failed':'Unavailable'}.get(row['status'],row['status'])) for row in rows]
     return dict(items=items,total=total,page=page,pages=pages,page_size=page_size)

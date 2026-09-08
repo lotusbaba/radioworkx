@@ -655,3 +655,12 @@ show fetch reason, status and local timestamp. Older batches remain browsable;
 repeated empty searches of the same kind collapse into their latest diagnostic.
 Live refresh preserves the selected page. This display order does not change FIFO
 listener scheduling or worker priorities.
+
+“What listeners asked for” and “Recent automatic acquisition activity” each have
+independent Previous/Next controls, ten entries per page, and newest-first ordering.
+Listener request history uses `/api/community-requests` and includes accepted track
+requests across all listeners, with hashed listener labels and no private chat.
+Automatic acquisition history uses `/api/downloads?scope=automatic` and includes
+completed refill downloads, library reuse, and terminal outcomes. Filters apply
+before pagination; older history is not limited to the recent SSE snapshot. Both
+sections preserve their selected page during live refreshes.

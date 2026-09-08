@@ -129,6 +129,20 @@ with sync_playwright() as p:
         page.wait_for_function('document.querySelector("#audio-status").textContent.includes("audio will start automatically")')
         page.get_by_role('button',name='Tune out').click()
     if '--read-only' in sys.argv:
+        navigated=[]
+        for prefix in ['community','automatic']:
+            page.wait_for_function("prefix=>document.querySelector('#'+prefix+'-page').textContent.includes('Page 1 of')",arg=prefix)
+            if page.locator(f'#{prefix}-next').is_enabled():
+                page.locator(f'#{prefix}-next').click()
+                page.wait_for_function("prefix=>document.querySelector('#'+prefix+'-page').textContent.includes('Page 2 of')",arg=prefix)
+                navigated.append(prefix)
+        page.wait_for_timeout(5500)
+        for prefix in navigated:
+            assert 'Page 2 of' in page.locator(f'#{prefix}-page').inner_text()
+            page.locator(f'#{prefix}-previous').click()
+            page.wait_for_function("prefix=>document.querySelector('#'+prefix+'-page').textContent.includes('Page 1 of')",arg=prefix)
+        page.locator('#automatic-history').screenshot(path=str(out/'automatic-desktop.png'))
+        page.locator('#community-requests').locator('..').screenshot(path=str(out/'community-desktop.png'))
         page.wait_for_function("document.querySelector('#downloads-page').textContent.includes('Page 1 of')")
         if page.locator('#downloads-next').is_enabled():
             page.locator('#downloads-next').click()
@@ -155,6 +169,8 @@ with sync_playwright() as p:
         page.set_viewport_size({'width':390,'height':844})
         page.locator('#station-stats').screenshot(path=str(out/'stats-mobile.png'))
         page.locator('.download-section').screenshot(path=str(out/'downloads-mobile.png'))
+        page.locator('#automatic-history').screenshot(path=str(out/'automatic-mobile.png'))
+        page.locator('#community-requests').locator('..').screenshot(path=str(out/'community-mobile.png'))
         assert page.locator('body').evaluate('(e)=>e.scrollWidth<=innerWidth')
         page.screenshot(path=str(out/'mobile.png'),full_page=True)
         assert not errors,errors

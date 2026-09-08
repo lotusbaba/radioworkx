@@ -647,3 +647,11 @@ demand is fulfilled. The community pulse continues to show outstanding Redis dem
 The public `/api/stats?period=7d` endpoint exposes aggregate counts only, with no
 listener identities or chat messages. Charts refresh every 30 seconds while the page
 is visible. The authenticated, paginated admin dashboard remains separate at `/admin`.
+
+The landing-page download queue has Previous/Next navigation with ten entries per
+page, backed by `/api/downloads`. All acquisition types share the same history,
+sorted newest activity first (completion time for newly downloaded tracks). Entries
+show fetch reason, status and local timestamp. Older batches remain browsable;
+repeated empty searches of the same kind collapse into their latest diagnostic.
+Live refresh preserves the selected page. This display order does not change FIFO
+listener scheduling or worker priorities.

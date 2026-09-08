@@ -67,33 +67,17 @@ function showStatus(s){
 function renderQueue(s){
   $('playlist-count').textContent=`${s.playlist.length} TRACKS`;
   $('up-next').textContent=s.up_next ? `Up next: ${s.up_next.title} · ${s.up_next.artists.join(' & ')}` : 'Next track will appear when eligible audio is ready.';
-  const item=(entry,i)=>{
-    const row=node('div',undefined,'queue-track'),m=entry.metadata;
-    const details=node('div',undefined,'queue-details');
-    details.append(node('strong',m?.title || entry.label || (entry.kind==='boost'?'Reaction-inspired selection':entry.kind==='request'?'Listener request':entry.kind==='recovery'?'Finding eligible new music':'Automatic ten-track batch')),node('span',m?`${m.artists.join(' & ')} · ${m.genre}`:'The downloader is preparing this request.'));
-    if(entry.selection)details.append(node('small',entry.selection));
-    if(entry.requested_by)details.append(node('small',`${entry.requested_by} · ${new Date(entry.requested_at*1000).toLocaleString()}`));
-    if(entry.kind)details.append(node('small',entry.kind==='boost'?'Reaction threshold':entry.kind==='request'?'Listener request':entry.kind==='recovery'?'No eligible music · recovery':'Automatic refill'));
-    row.append(node('span',String(i+1).padStart(2,'0'),'queue-number'),details,node('span',entry.status,'queue-status'));
-    row.classList.toggle('is-current',entry.status==='Now playing'||entry.status==='Downloading');
-    if(entry.duration)row.append(node('span',time(entry.duration),'queue-duration'));
-    return row;
-  };
   $('request-count').textContent=`${s.request_queue.length} REQUESTS`;
-  $('request-queue').replaceChildren(...s.request_queue.map(item));
-  $('community-requests').replaceChildren(...(s.community_requests||[]).map(item));
+  $('request-queue').replaceChildren(...s.request_queue.map(queueItem));
+  $('community-requests').replaceChildren(...(s.community_requests||[]).map(queueItem));
   if(!s.community_requests?.length)$('community-requests').append(node('p','No music requests yet.','empty'));
   if(!s.request_queue.length)$('request-queue').append(node('p','No listener requests yet. Make the next discovery yours.','empty'));
-  $('playlist').replaceChildren(...s.playlist.map(item));
+  $('playlist').replaceChildren(...s.playlist.map(queueItem));
   if(s.playlist.length && s.playlist.length<10)$('playlist').append(node('p',`${s.playlist.length} distinct playable tracks forecast. Repeats are not used to fill this list. Downloading or policy-deferred requests appear in the request queue until ready.`,'empty'));
   if(!s.playlist.length)$('playlist').append(node('p','No eligible tracks are ready yet. The preview updates automatically.','empty'));
   $('download-summary').textContent=s.download_summary;
-  const automaticActivity=s.download_activity.filter(x=>x.kind==='refill');
-  $('download-activity').replaceChildren(...automaticActivity.map(item));
-  if(!automaticActivity.length)$('download-activity').append(node('p','No completed acquisition jobs yet.','empty'));
-  $('download-count').textContent=`${s.active_download_count} ACTIVE · ${s.download_queue.length-s.active_download_count} COMPLETED`;
-  $('download-queue').replaceChildren(...s.download_queue.map(item));
-  if(!s.download_queue.length)$('download-queue').append(node('p','No downloads in progress. Completed downloads and library reuse are listed below.','empty'));
+  $('download-count').textContent=`${s.active_download_count} ACTIVE`;
+  if(Date.now()-downloadLastRefresh>5000)refreshDownloads();
 }
 function updateCooldown(){
   const seconds=Math.max(0,Math.ceil((nextReactionAt-(Date.now()+serverOffset))/1000));
@@ -277,3 +261,35 @@ document.querySelectorAll('[data-period]').forEach(button=>button.onclick=()=>{
 });
 refreshStats();setInterval(()=>{if(!document.hidden)refreshStats();},30000);
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)refreshStats();});
+
+function queueItem(entry,i){
+    const row=node('div',undefined,'queue-track'),m=entry.metadata;
+    const details=node('div',undefined,'queue-details');
+    details.append(node('strong',m?.title || entry.label || (entry.kind==='boost'?'Reaction-inspired selection':entry.kind==='request'?'Listener request':entry.kind==='recovery'?'Finding eligible new music':'Automatic ten-track batch')),node('span',m?`${m.artists.join(' & ')} · ${m.genre}`:'The downloader is preparing this request.'));
+    if(entry.updated_at)details.append(node('small',new Date(entry.updated_at*1000).toLocaleString()));
+    if(entry.selection)details.append(node('small',entry.selection));
+    if(entry.requested_by)details.append(node('small',`${entry.requested_by} · ${new Date(entry.requested_at*1000).toLocaleString()}`));
+    if(entry.kind)details.append(node('small',entry.kind==='boost'?'Reaction threshold':entry.kind==='request'?'Listener request':entry.kind==='recovery'?'No eligible music · recovery':'Automatic refill'));
+    row.append(node('span',String(i+1).padStart(2,'0'),'queue-number'),details,node('span',entry.status,'queue-status'));
+    row.classList.toggle('is-current',entry.status==='Now playing'||entry.status==='Downloading');
+    if(entry.duration)row.append(node('span',time(entry.duration),'queue-duration'));
+    return row;
+}
+
+let downloadPage=1, downloadPages=1, downloadLastRefresh=0, downloadRevision=0;
+async function refreshDownloads(){
+  downloadLastRefresh=Date.now();const revision=++downloadRevision;
+  $('downloads-previous').disabled=true;$('downloads-next').disabled=true;
+  try{
+    const response=await fetch(`/api/downloads?page=${downloadPage}&page_size=10`);
+    if(!response.ok)throw new Error();
+    const data=await response.json();if(revision!==downloadRevision)return;
+    downloadPage=data.page;downloadPages=data.pages;
+    $('download-queue').replaceChildren(...data.items.map((entry,i)=>queueItem(entry,(data.page-1)*data.page_size+i)));
+    if(!data.items.length)$('download-queue').append(node('p','No downloads yet. New activity will appear here.','empty'));
+    $('downloads-page').textContent=`Page ${data.page} of ${data.pages} · ${data.total.toLocaleString()} entries · Latest first`;
+  }catch{if(revision===downloadRevision)$('downloads-page').textContent='Could not refresh downloads. Retrying automatically.';}
+  finally{if(revision===downloadRevision){$('downloads-previous').disabled=downloadPage<=1;$('downloads-next').disabled=downloadPage>=downloadPages;}}
+}
+$('downloads-previous').onclick=()=>{if(downloadPage>1){downloadPage--;refreshDownloads();}};
+$('downloads-next').onclick=()=>{if(downloadPage<downloadPages){downloadPage++;refreshDownloads();}};

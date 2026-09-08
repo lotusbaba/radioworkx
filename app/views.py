@@ -120,3 +120,45 @@ def next_airtime(c, now):
     for at in sorted({now}|{p['ends']+WINDOW for p in history if p['ends']+WINDOW>now}):
         if any(eligible(meta,history,at) for meta in tracks):return at
     return None
+
+
+def download_page(c, page=1, page_size=10):
+    """Browse all acquisition jobs by latest track activity, independent of playback order."""
+    query="""
+    WITH entries AS (
+      SELECT o.id AS job_id,o.created,o.done,o.failed,
+        json_extract(o.body,'$.kind') AS kind,
+        json_extract(o.body,'$.discover_genre') AS genre,
+        t.metadata,t.status AS track_status,t.error,t.downloaded_at,
+        x.value AS track_id,
+        EXISTS(SELECT 1 FROM json_each(j.body,'$.completed') z WHERE z.value=x.value) AS completed
+      FROM outbox o LEFT JOIN jobs j ON j.id=o.id
+      LEFT JOIN json_each(CASE WHEN j.body IS NOT NULL THEN json_extract(j.body,'$.tracks')
+        WHEN json_extract(o.body,'$.track_id') IS NOT NULL THEN json_array(json_extract(o.body,'$.track_id'))
+        ELSE '[]' END) x
+      LEFT JOIN tracks t ON t.id=x.value
+      WHERE o.queue IN ('downloads','priority-downloads','request-downloads')
+    ), timed AS (
+      SELECT *,CASE WHEN completed AND downloaded_at>=created THEN downloaded_at
+        WHEN completed THEN COALESCE(done,created) ELSE COALESCE(done,created) END AS updated_at,
+        ROW_NUMBER() OVER (PARTITION BY CASE WHEN track_id IS NULL THEN kind ELSE job_id||':'||track_id END ORDER BY created DESC,job_id DESC) AS diagnostic_rank
+      FROM entries
+    ), visible AS (SELECT * FROM timed WHERE track_id IS NOT NULL OR diagnostic_rank=1)
+    """
+    total=c.execute(query+'SELECT COUNT(*) FROM visible').fetchone()[0]
+    pages=max(1,(total+page_size-1)//page_size)
+    page=min(page,pages)
+    rows=c.execute(query+'SELECT * FROM visible ORDER BY updated_at DESC,job_id DESC,track_id DESC LIMIT ? OFFSET ?',
+                   (page_size,(page-1)*page_size))
+    items=[]
+    for row in rows:
+        if row['failed']: status='Failed after retries'
+        elif row['completed']: status='Downloaded' if row['downloaded_at'] is not None and row['downloaded_at']>=row['created'] else 'Reused from library'
+        elif row['done']: status='No matching authorized tracks'
+        elif row['error']: status='Retry pending'
+        elif row['track_status']=='downloading': status='Downloading'
+        else: status='Queued' if row['track_id'] else 'Selecting tracks'
+        items.append(dict(job_id=row['job_id'],metadata=json.loads(row['metadata']) if row['metadata'] else None,
+                          kind=row['kind'],status=status,updated_at=row['updated_at'],
+                          label=f"Requested genre: {row['genre']}" if row['genre'] else None))
+    return dict(items=items,total=total,page=page,pages=pages,page_size=page_size)

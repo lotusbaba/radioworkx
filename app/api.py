@@ -8,7 +8,7 @@ import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal
-from fastapi import FastAPI, HTTPException, Request, Response, Depends
+from fastapi import FastAPI, HTTPException, Request, Response, Depends, Query
 from fastapi.responses import FileResponse, StreamingResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from itsdangerous import BadSignature, URLSafeSerializer
@@ -90,6 +90,13 @@ def status():
                     download_status=db.setting(c,'download_status','Waiting for authorized audio'),
                     recent=[{'metadata':json.loads(p['metadata']),'starts':p['starts']} for p in history],
                     server_time=time.time())
+
+@app.get('/api/downloads')
+def downloads_page(page: int=Query(1,ge=1,le=1000000),page_size: int=Query(10,ge=1,le=100)):
+    from app.views import download_page
+    with db.connect() as c:
+        c.execute('BEGIN')
+        return download_page(c,page,page_size)
 
 @app.get('/api/stats')
 def public_stats(response: Response, period: Literal['24h','7d','all']='7d'):

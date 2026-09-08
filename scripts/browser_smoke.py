@@ -129,6 +129,15 @@ with sync_playwright() as p:
         page.wait_for_function('document.querySelector("#audio-status").textContent.includes("audio will start automatically")')
         page.get_by_role('button',name='Tune out').click()
     if '--read-only' in sys.argv:
+        page.wait_for_function("document.querySelector('#downloads-page').textContent.includes('Page 1 of')")
+        if page.locator('#downloads-next').is_enabled():
+            page.locator('#downloads-next').click()
+            page.wait_for_function("document.querySelector('#downloads-page').textContent.includes('Page 2 of')")
+            page.wait_for_timeout(5500)
+            assert 'Page 2 of' in page.locator('#downloads-page').inner_text()
+            page.locator('#downloads-previous').click()
+            page.wait_for_function("document.querySelector('#downloads-page').textContent.includes('Page 1 of')")
+        page.locator('.download-section').screenshot(path=str(out/'downloads-desktop.png'))
         page.locator('#stats-metrics .stat-metric').first.wait_for()
         for period in ['all','24h','7d']:
             page.locator(f'[data-period="{period}"]').click()
@@ -145,6 +154,7 @@ with sync_playwright() as p:
         page.screenshot(path=str(out/'desktop.png'),full_page=True)
         page.set_viewport_size({'width':390,'height':844})
         page.locator('#station-stats').screenshot(path=str(out/'stats-mobile.png'))
+        page.locator('.download-section').screenshot(path=str(out/'downloads-mobile.png'))
         assert page.locator('body').evaluate('(e)=>e.scrollWidth<=innerWidth')
         page.screenshot(path=str(out/'mobile.png'),full_page=True)
         assert not errors,errors

@@ -681,3 +681,53 @@ history can otherwise make it disagree with the preview forever after older play
 expire from that window. Introductions use cached or finished background speech;
 the music loop never waits for speech generation. If an introduction is not ready,
 that track starts without it and upcoming speech continues preparing in the background.
+
+### Catalog and exact-track queue APIs
+
+Base URL: `https://radioworkx.tail060b33.ts.net`. Interactive API documentation is
+available at `/docs`, with the schema at `/openapi.json`.
+
+| Method and path | Purpose |
+| --- | --- |
+| `GET /api/catalog/genres` | Selectable genres, track counts and downloaded counts |
+| `GET /api/catalog/tracks` | Paginated selectable catalog; optional repeated `genre`, `q`, `page`, `page_size` |
+| `POST /api/queue` | Add an exact catalog `track_id` as a listener request |
+
+Catalog browsing is public and exposes no private media URLs, local paths or rights
+reference strings. Tracks are selectable when ready, or when an authorized download
+source exists and the permanent library cap has not been reached. Genre filters
+are case-insensitive, repeated genres match any listed genre, and `q` searches title,
+artist and album. Results sort by title then ID. Page size defaults to 20, maximum
+100. Responses contain `items`, `total`, `page`, `pages`, `page_size`; genre counts
+contain `items`. Downloaded is a readiness flag, not a guarantee of current policy
+eligibility. Unknown genre/search matches return an empty page.
+
+```sh
+curl 'https://radioworkx.tail060b33.ts.net/api/catalog/genres'
+curl 'https://radioworkx.tail060b33.ts.net/api/catalog/tracks?genre=jazz&genre=funk&page=1&page_size=20'
+
+# Establish a listener session and retain its cookie for queue requests.
+curl -sS -c /tmp/radioworkx-listener.cookies https://radioworkx.tail060b33.ts.net/ -o /dev/null
+# Replace TRACK_ID with an ID returned by the catalog.
+# Use a new UUID for a new request; reuse the same UUID and body when retrying.
+curl -b /tmp/radioworkx-listener.cookies \
+  -H 'Content-Type: application/json' \
+  -d '{"track_id":"TRACK_ID","request_id":"8e0091ec-1f65-4449-a1dc-cfb36b77bcef"}' \
+  https://radioworkx.tail060b33.ts.net/api/queue
+```
+
+Queue success returns HTTP 202 and the existing request representation (`id`,
+`track_id`, `status`, `response`, etc.). The UUID may be omitted for a new request,
+but clients should provide it for safe retries. Reusing an ID with another listener
+or different request returns 409. Missing session: 401; unknown track: 404;
+unavailable/unauthorized download or library cap: 409; malformed input: 422;
+more than 10 recent requests per listener/minute: 429 with Retry-After.
+
+Queueing uses the existing request-download SQS outbox/consumer, including reuse of
+ready audio. It never imports arbitrary URLs or invokes AI chat. Requests are FIFO
+before automatic selections; currently playing audio finishes first and ineligible
+or downloading requests are deferred. The performance complement and download cap
+remain enforced. Shared SSE snapshots, request history and up-next intro preparation
+pick up these requests through the existing pipeline. No permissive cross-origin
+browser access is configured: clients can use the same origin or a server-side
+HTTP client with the listener cookie.

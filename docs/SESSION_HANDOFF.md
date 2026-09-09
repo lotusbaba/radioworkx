@@ -302,3 +302,19 @@ Playback never waits for generation. Existing matching audio is adopted on looku
 no age expiry or automatic regeneration on voice/model changes. Missing audio can
 be regenerated. Source tests cover persistent reuse, variant isolation, legacy
 adoption, new track references, cooldown fairness and newly arriving requests.
+
+## Latest update: catalog selection and exact-track queue APIs (2026-09-09)
+
+Added `app/catalog_api.py`, API routes and `tests/test_catalog_api.py`.
+- GET `/api/catalog/genres`: public selectable genre/count list.
+- GET `/api/catalog/tracks`: public pagination (20 default, 100 max), repeated genre
+  filter (OR, case-insensitive), title/artist/album `q`, stable title/ID ordering.
+- POST `/api/queue`: exact track ID + optional UUID request_id, existing signed
+  listener cookie required (GET `/` first). Atomic FIFO request/outbox, idempotent
+  retries, 10 requests/minute per listener, no AI call or arbitrary URL imports.
+- Ready tracks or licensed downloadable tracks only; permanent download cap,
+  DEMO isolation and standard station policy remain effective. Public track DTO
+  excludes internal source/path/rights strings. Shared snapshots expose requests.
+- README contains curl usage, response shapes and error codes; `/docs` exposes schema.
+- 113 tests passed, including genre filters, pagination/privacy, cap enforcement,
+  session validation, exact-ID retries/conflicts, deferred downloads and rate limits.

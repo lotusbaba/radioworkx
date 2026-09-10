@@ -19,6 +19,7 @@ from app.config import DEMO, EMOJIS, MAX_TRACKS, REDIS_URL, THRESHOLD
 from app.events import ranking, r
 from app.service import accept_reaction, now_playing, next_reaction_at, ReactionCooldown, COOLDOWN
 from app.views import playlist_views, next_airtime
+from app.app_tokens import authenticate as app_token
 
 sessions = URLSafeSerializer(os.getenv('SESSION_SECRET','local-development-change-me'),salt='listener')
 STATIC = Path(__file__).parent / 'static'
@@ -150,12 +151,12 @@ def react(body: Reaction, request: Request):
     with db.connect() as c:
         return {'event_id':id,'status':'queued','next_reaction_at':next_reaction_at(c,who),'server_time':time.time()}
 
-@app.get('/api/catalog/genres')
+@app.get('/api/catalog/genres',dependencies=[Depends(app_token)])
 def catalog_genres():
     from app.catalog_api import genre_counts
     return genre_counts()
 
-@app.get('/api/catalog/tracks')
+@app.get('/api/catalog/tracks',dependencies=[Depends(app_token)])
 def catalog_tracks(genre: list[str]=Query(default=[]),q: str=Query('',max_length=300),
                    page: int=Query(1,ge=1,le=1000000),page_size: int=Query(20,ge=1,le=100)):
     from app.catalog_api import catalog
@@ -166,9 +167,9 @@ class QueueTrack(BaseModel):
     request_id: uuid.UUID=Field(default_factory=uuid.uuid4)
 
 @app.post('/api/queue',status_code=202)
-def queue_track(body: QueueTrack,request: Request):
+def queue_track(body: QueueTrack,identity: str=Depends(app_token)):
     from app.catalog_api import enqueue
-    return enqueue(body.track_id,listener(request),str(body.request_id))
+    return enqueue(body.track_id,identity,str(body.request_id))
 
 class TrackRequest(BaseModel):
     request_id: uuid.UUID = Field(default_factory=uuid.uuid4)

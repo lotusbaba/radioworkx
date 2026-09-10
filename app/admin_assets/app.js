@@ -13,3 +13,38 @@ async function load(all=false){$('error').textContent='';try{await Promise.all(a
 for(const [key,title] of Object.entries(titles)){const b=node('button',title);b.type='button';b.setAttribute('aria-selected',String(key===tab));b.onclick=()=>{tab=key;page=1;for(const e of $('tabs').children)e.setAttribute('aria-selected',String(e===b));load();};$('tabs').append(b);}
 $('period').onchange=()=>{if($('period').value!=='custom'){dates();page=1;load(true);}};
 $('apply').onclick=()=>{page=1;load(true);};$('refresh').onclick=()=>load(true);$('size').onchange=()=>{page=1;load();};let timer;$('search').oninput=()=>{clearTimeout(timer);timer=setTimeout(()=>{page=1;load();},300);};$('previous').onclick=()=>{if(page>1){page--;load();}};$('next').onclick=()=>{if(page<pages){page++;load();}};load(true);
+
+let tokenPage=1,tokenPages=1;
+function hideToken(){ $('token-value').value='';$('token-reveal').hidden=true;$('token-create').disabled=false; }
+async function tokenCall(url,method,body){
+  const response=await fetch(url,{method,headers:{'Content-Type':'application/json','X-Admin-Action':'tokens'},body:body?JSON.stringify(body):undefined,cache:'no-store'});
+  if(!response.ok)throw Error(`Token operation failed (${response.status}).`);
+  return response.json();
+}
+async function tokenList(){
+  const data=await get('/api/admin/tokens?page='+tokenPage);tokenPage=data.page;tokenPages=data.pages;
+  $('token-rows').replaceChildren(...data.items.map(item=>{
+    const row=node('tr','');
+    for(const value of [item.name,item.token,new Date(item.created*1000).toLocaleString(),item.last_used?new Date(item.last_used*1000).toLocaleString():'Never',item.revoked?'Revoked':'Active'])row.append(node('td',value));
+    const cell=node('td',''),button=node('button','Revoke');button.disabled=!!item.revoked;
+    button.onclick=async()=>{button.disabled=true;try{await tokenCall('/api/admin/tokens/'+item.id,'DELETE');hideToken();await tokenList();}catch(e){button.disabled=false;$('token-message').textContent=e.message;}};
+    cell.append(button);row.append(cell);return row;
+  }));
+  $('token-page').textContent=`Page ${data.page} of ${data.pages} · ${data.total} tokens`;
+  $('token-previous').disabled=tokenPage<=1;$('token-next').disabled=tokenPage>=tokenPages;
+}
+$('token-form').onsubmit=async event=>{
+  event.preventDefault();if(!$('token-reveal').hidden)return;
+  $('token-create').disabled=true;$('token-message').textContent='';
+  try{
+    const result=await tokenCall('/api/admin/tokens','POST',{name:$('token-name').value.trim()});
+    $('token-value').value=result.token;$('token-reveal').hidden=false;$('token-name').value='';tokenPage=1;await tokenList();
+    $('token-message').textContent='Save this token now. It cannot be retrieved again.';
+  }catch(e){$('token-message').textContent=e.message;if($('token-reveal').hidden)$('token-create').disabled=false;}
+};
+$('token-copy').onclick=async()=>{try{await navigator.clipboard.writeText($('token-value').value);hideToken();$('token-message').textContent='Copied. The token is now permanently hidden here.';}catch{$('token-message').textContent='Clipboard unavailable. Copy the displayed token manually, then select Hide permanently.';}};
+$('token-hide').onclick=()=>{hideToken();$('token-message').textContent='Token hidden. Generate a replacement if you did not save it.';};
+window.addEventListener('pagehide',hideToken);
+$('token-previous').onclick=()=>{tokenPage--;tokenList().catch(e=>$('token-message').textContent=e.message);};
+$('token-next').onclick=()=>{tokenPage++;tokenList().catch(e=>$('token-message').textContent=e.message);};
+tokenList().catch(e=>$('token-message').textContent=e.message);

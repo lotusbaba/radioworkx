@@ -19,6 +19,29 @@ with sync_playwright() as p:
         admin.on('pageerror',lambda e:admin_errors.append(str(e)))
         admin.goto(url.rstrip('/')+'/admin',wait_until='networkidle')
         admin.wait_for_function('document.querySelectorAll("#metrics .card").length===4')
+        if '--token-check' in sys.argv:
+            admin.locator('#token-name').fill('Browser verification (revoked after check)')
+            with admin.expect_response(lambda r:r.url.endswith('/api/admin/tokens') and r.request.method=='POST') as created:
+                admin.locator('#token-create').click()
+            issued=created.value.json()
+            try:
+                admin.locator('#token-reveal').wait_for(state='visible')
+                assert admin.locator('#token-value').input_value()==issued['token']
+                assert issued['token'] not in admin.locator('#token-rows').inner_text()
+                assert admin.evaluate("async token=>(await fetch('/api/catalog/genres',{headers:{Authorization:'Bearer '+token}})).status",issued['token'])==200
+                admin.evaluate("window.tokenCopied=false;Object.defineProperty(navigator,'clipboard',{value:{writeText:async()=>{window.tokenCopied=true;}}});")
+                admin.locator('#token-copy').click()
+                admin.wait_for_function('window.tokenCopied && document.querySelector("#token-reveal").hidden')
+                assert admin.locator('#token-value').input_value()==''
+                admin.reload(wait_until='networkidle')
+                assert admin.locator('#token-value').input_value()==''
+                assert issued['token'] not in admin.content()
+                admin.locator('#token-rows tr').filter(has_text='Browser verification').first.get_by_role('button',name='Revoke').click()
+                admin.wait_for_function("document.querySelector('#token-rows').textContent.includes('Revoked')")
+                assert admin.evaluate("async token=>(await fetch('/api/catalog/genres',{headers:{Authorization:'Bearer '+token}})).status",issued['token'])==401
+            finally:
+                context.request.delete(url.rstrip('/')+'/api/admin/tokens/'+issued['id'],headers={'X-Admin-Action':'tokens'})
+                issued.clear()
         assert admin.locator('#rows tr').count()>0
         if admin.locator('#next').is_enabled():
             admin.locator('#next').click()

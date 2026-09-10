@@ -693,7 +693,7 @@ available at `/docs`, with the schema at `/openapi.json`.
 | `GET /api/catalog/tracks` | Paginated selectable catalog; optional repeated `genre`, `q`, `page`, `page_size` |
 | `POST /api/queue` | Add an exact catalog `track_id` as a listener request |
 
-Catalog browsing is public and exposes no private media URLs, local paths or rights
+Catalog browsing requires an app bearer token and exposes no private media URLs, local paths or rights
 reference strings. Tracks are selectable when ready, or when an authorized download
 source exists and the permanent library cap has not been reached. Genre filters
 are case-insensitive, repeated genres match any listed genre, and `q` searches title,
@@ -703,14 +703,13 @@ contain `items`. Downloaded is a readiness flag, not a guarantee of current poli
 eligibility. Unknown genre/search matches return an empty page.
 
 ```sh
-curl 'https://radioworkx.tail060b33.ts.net/api/catalog/genres'
-curl 'https://radioworkx.tail060b33.ts.net/api/catalog/tracks?genre=jazz&genre=funk&page=1&page_size=20'
+curl -H "Authorization: Bearer $RADIOWORKX_TOKEN" 'https://radioworkx.tail060b33.ts.net/api/catalog/genres'
+curl -H "Authorization: Bearer $RADIOWORKX_TOKEN" 'https://radioworkx.tail060b33.ts.net/api/catalog/tracks?genre=jazz&genre=funk&page=1&page_size=20'
 
-# Establish a listener session and retain its cookie for queue requests.
-curl -sS -c /tmp/radioworkx-listener.cookies https://radioworkx.tail060b33.ts.net/ -o /dev/null
+# Set RADIOWORKX_TOKEN privately to the token created in /admin.
 # Replace TRACK_ID with an ID returned by the catalog.
 # Use a new UUID for a new request; reuse the same UUID and body when retrying.
-curl -b /tmp/radioworkx-listener.cookies \
+curl -H "Authorization: Bearer $RADIOWORKX_TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{"track_id":"TRACK_ID","request_id":"8e0091ec-1f65-4449-a1dc-cfb36b77bcef"}' \
   https://radioworkx.tail060b33.ts.net/api/queue
@@ -718,10 +717,10 @@ curl -b /tmp/radioworkx-listener.cookies \
 
 Queue success returns HTTP 202 and the existing request representation (`id`,
 `track_id`, `status`, `response`, etc.). The UUID may be omitted for a new request,
-but clients should provide it for safe retries. Reusing an ID with another listener
-or different request returns 409. Missing session: 401; unknown track: 404;
+but clients should provide it for safe retries. Reusing an ID with another app token
+or different request returns 409. Missing, invalid, or revoked token: 401; unknown track: 404;
 unavailable/unauthorized download or library cap: 409; malformed input: 422;
-more than 10 recent requests per listener/minute: 429 with Retry-After.
+more than 10 recent requests per app token/minute: 429 with Retry-After.
 
 Queueing uses the existing request-download SQS outbox/consumer, including reuse of
 ready audio. It never imports arbitrary URLs or invokes AI chat. Requests are FIFO
@@ -730,4 +729,30 @@ or downloading requests are deferred. The performance complement and download ca
 remain enforced. Shared SSE snapshots, request history and up-next intro preparation
 pick up these requests through the existing pipeline. No permissive cross-origin
 browser access is configured: clients can use the same origin or a server-side
-HTTP client with the listener cookie.
+HTTP client with the bearer token.
+
+
+### Calling-app token management
+
+Sign in at `/admin`, scroll to **App API tokens**, enter an app name and select
+**Generate token**. The full token is returned only in that creation response and
+shown once. **Copy and hide** copies it then clears the field; **Hide permanently**
+clears it without copying. Leaving/reloading the page also removes the reveal.
+There is no token recovery/reveal endpoint. If lost, revoke it and generate another.
+
+All three integration endpoints (`/api/catalog/genres`, `/api/catalog/tracks`,
+`/api/queue`) require `Authorization: Bearer <token>`. Each token grants catalog
+browsing and queueing, and supplies its own app identity for FIFO requests,
+idempotency and rate limits. No listener cookie or OpenAI key is needed. Normal
+website player/chat/reaction routes retain their listener-session authentication.
+Keep app tokens in calling-app backend configuration, never public browser bundles.
+
+The admin list is paginated, shows masked tokens, creation/last-use timestamps and
+revocation state. Admin creation/revocation requires existing admin HTTP Basic
+credentials plus the same-origin token controls' `X-Admin-Action: tokens` header.
+Token responses use `Cache-Control: no-store`. SQLite `app_tokens` stores a SHA-256
+digest of a cryptographically random 256-bit secret, with label/id/timestamps;
+neither the full token nor a decryptable copy is persisted. Revocation rejects
+subsequent calls immediately; already accepted track requests remain queued.
+Tokens have no automatic expiry. Admin credentials alone do not authorize the
+calling-app endpoints. `/docs` documents the AppToken bearer security scheme.

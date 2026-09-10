@@ -1,4 +1,4 @@
-"""Read-only operator dashboard, authenticated and paginated at the database."""
+"""Authenticated operator dashboard, repository browsing and app-token management."""
 import hashlib
 import math
 import os
@@ -6,7 +6,8 @@ import secrets
 import time
 from pathlib import Path
 from typing import Literal
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from pydantic import BaseModel, Field
 from fastapi.responses import HTMLResponse, Response
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from app import db
@@ -23,6 +24,45 @@ def authorize(credentials:HTTPBasicCredentials=Depends(security)):
 
 router=APIRouter(dependencies=[Depends(authorize)])
 FILES=Path(__file__).parent/'admin_assets'
+
+
+def token_mutation(request: Request):
+    from urllib.parse import urlparse
+    origin=request.headers.get('origin')
+    if request.headers.get('x-admin-action')!='tokens' or (origin and urlparse(origin).netloc!=request.url.netloc):
+        raise HTTPException(403,'Use the admin token controls on this site.')
+
+
+class TokenName(BaseModel):
+    name: str=Field(min_length=1,max_length=100)
+
+
+@router.post('/api/admin/tokens',status_code=201,dependencies=[Depends(token_mutation)])
+def create_token(body: TokenName,response: Response):
+    from app.app_tokens import issue
+    name=body.name.strip()
+    if not name:raise HTTPException(422,'Enter an app name.')
+    response.headers['Cache-Control']='no-store'
+    return issue(name)
+
+
+@router.get('/api/admin/tokens')
+def list_tokens(response: Response,page:int=Query(1,ge=1),page_size:int=Query(10,ge=1,le=100)):
+    response.headers['Cache-Control']='no-store'
+    with db.connect() as c:
+        total=c.execute('SELECT COUNT(*) FROM app_tokens').fetchone()[0]
+        pages=max(1,(total+page_size-1)//page_size);page=min(page,pages)
+        items=[dict(r,token='••••••••') for r in c.execute('SELECT id,name,created,last_used,revoked FROM app_tokens ORDER BY created DESC,id DESC LIMIT ? OFFSET ?',(page_size,(page-1)*page_size))]
+    return dict(items=items,total=total,page=page,pages=pages)
+
+
+@router.delete('/api/admin/tokens/{token_id}',dependencies=[Depends(token_mutation)])
+def revoke_token(token_id:str,response:Response):
+    response.headers['Cache-Control']='no-store'
+    with db.transaction() as c:
+        if not c.execute('SELECT 1 FROM app_tokens WHERE id=?',(token_id,)).fetchone():raise HTTPException(404,'Token not found.')
+        c.execute('UPDATE app_tokens SET revoked=COALESCE(revoked,?) WHERE id=?',(time.time(),token_id))
+    return {'status':'revoked'}
 
 
 @router.get('/admin',response_class=HTMLResponse)

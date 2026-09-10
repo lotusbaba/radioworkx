@@ -5,6 +5,10 @@ from contextlib import contextmanager
 from app.config import DATA
 
 SCHEMA = """
+CREATE TABLE IF NOT EXISTS app_tokens (
+ id TEXT PRIMARY KEY, name TEXT NOT NULL, digest TEXT NOT NULL UNIQUE,
+ created REAL NOT NULL, last_used REAL, revoked REAL
+);
 CREATE TABLE IF NOT EXISTS tracks (
  id TEXT PRIMARY KEY, metadata TEXT NOT NULL, source TEXT, rights TEXT,
  status TEXT NOT NULL DEFAULT 'available', duration REAL, path TEXT, error TEXT,

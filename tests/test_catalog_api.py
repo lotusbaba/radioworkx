@@ -14,7 +14,7 @@ def seed(metadata):
 
 
 def test_genre_selection_pagination_and_privacy(metadata):
-    seed(metadata);client=TestClient(app)
+    seed(metadata);client=token_client()
     assert client.get('/api/catalog/genres').json()['items']==[{'genre':'funk','tracks':1,'downloaded':0},{'genre':'jazz','tracks':1,'downloaded':1}]
     data=client.get('/api/catalog/tracks?genre=jazz&genre=funk&page_size=1&page=2').json()
     assert data['total']==2 and data['items'][0]['id']=='b'
@@ -27,10 +27,11 @@ def test_genre_selection_pagination_and_privacy(metadata):
 
 
 def test_exact_queue_session_fifo_idempotence_and_download(metadata):
-    seed(metadata);client=TestClient(app);rid=str(uuid.uuid4())
+    seed(metadata);client=token_client();rid=str(uuid.uuid4())
     body={'track_id':'b','request_id':rid}
+    auth=client.headers.pop('Authorization')
     assert client.post('/api/queue',json=body).status_code==401
-    client.get('/')
+    client.headers['Authorization']=auth
     first=client.post('/api/queue',json=body)
     assert first.status_code==202 and first.json()['track_id']=='b'
     assert client.post('/api/queue',json=body).json()==first.json()
@@ -49,11 +50,16 @@ def test_exact_queue_session_fifo_idempotence_and_download(metadata):
 
 
 def test_queue_rate_limit_and_cross_listener_id_collision(metadata):
-    seed(metadata);client=TestClient(app);client.get('/')
+    seed(metadata);client=token_client();client.get('/')
     rid=str(uuid.uuid4())
     assert client.post('/api/queue',json={'track_id':'a','request_id':rid}).status_code==202
-    other=TestClient(app);other.get('/')
+    other=token_client();other.get('/')
     assert other.post('/api/queue',json={'track_id':'a','request_id':rid}).status_code==409
     for _ in range(9):assert client.post('/api/queue',json={'track_id':'a'}).status_code==202
     assert client.post('/api/queue',json={'track_id':'a'}).status_code==429
     assert client.post('/api/queue',json={'track_id':'a','request_id':rid}).status_code==202
+
+
+def token_client():
+    from app.app_tokens import issue
+    return TestClient(app,headers={'Authorization':'Bearer '+issue('Test app')['token']})

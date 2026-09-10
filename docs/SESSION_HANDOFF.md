@@ -318,3 +318,19 @@ Added `app/catalog_api.py`, API routes and `tests/test_catalog_api.py`.
 - README contains curl usage, response shapes and error codes; `/docs` exposes schema.
 - 113 tests passed, including genre filters, pagination/privacy, cap enforcement,
   session validation, exact-ID retries/conflicts, deferred downloads and rate limits.
+
+
+## Latest update: admin-issued calling-app tokens (2026-09-09)
+
+The catalog and exact-track queue APIs now REQUIRE bearer app tokens; earlier
+public/session-cookie integration instructions are superseded. `app/app_tokens.py`
+issues random opaque credentials and stores only SHA-256 digests in `app_tokens`.
+Admin creates labelled tokens, sees plaintext once, copies/hides it, then only a
+mask is available. Paginated list includes last use and revocation. No secret reveal
+endpoint. Admin mutation requests have a custom-header and origin check in addition
+to HTTP Basic auth; token responses are no-store. Calling apps use Authorization:
+Bearer, with app-token identity replacing the listener cookie for `/api/queue`.
+The three gated routes are `/api/catalog/genres`, `/api/catalog/tracks`, `/api/queue`.
+Website listener routes are unchanged. Scope is browse+queue; no expiration setting.
+115 tests pass, covering hashed storage, one-time response, masking, revocation,
+missing/invalid auth, admin checks, pagination and app-specific request idempotency.

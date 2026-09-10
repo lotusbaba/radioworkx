@@ -1,6 +1,6 @@
 # RadioWorkx session handoff
 
-Saved 2026-09-08, America/Los_Angeles. This is a durable engineering handoff of the
+Updated 2026-09-10, America/Los_Angeles. This is a durable engineering handoff of the
 available conversation context, decisions, and implemented work, not a verbatim
 chat export or a backup of live databases/media. Never put API keys, passwords,
 cookies, or raw private listener conversations in this document.
@@ -11,8 +11,8 @@ cookies, or raw private listener conversations in this document.
 - GitHub: private repository https://github.com/lotusbaba/radioworkx ; branch `main`.
 - Current public site: https://radioworkx.tail060b33.ts.net/ . No Tailscale client required for visitors.
 - Admin: same origin, `/admin`; username `admin`, password stored locally in ignored `.admin-credentials` and `.env`.
-- Latest application tests: **110 passed**. Public browser smoke with audio passed after the playback fix and hostname change.
-- Last completed request before saving: explain why renaming MagicDNS required reapplying Funnel. The answer is below.
+- Latest verified application tests: **115 passed** after app-token changes. Live admin token creation/hiding/revocation and desktop/mobile browser checks passed. Tests were not rerun for this documentation-only handoff.
+- Last completed discussion: portfolio summary, SQLite location, and named-volume persistence. Latest implementation: admin-issued bearer tokens for calling apps. Details below.
 - No known unfinished feature request at handoff. Live state changes; do not assume old track names, counters, or worker states remain current.
 - User prefers implementing fixes directly, preserving earlier requirements, and avoiding repeated confirmation. Never expose credentials. Use approval escalation if a needed operation is blocked by the sandbox.
 
@@ -284,6 +284,10 @@ resolved by `gh auth status` outside the sandbox; account is `lotusbaba`.
 - `673d734`: paginated listener requests and automatic acquisition history.
 - `899ba34`: playback selection loop and nonblocking speech fix.
 - `69ac4d9`: renamed public hostname in README.
+- `29925c9`: first comprehensive handoff and AGENTS.md entry point.
+- `cb3afa5`: prepare next-ten intros and persist reusable track references.
+- `07e6bcc`: genre catalog browsing and exact-track queue APIs.
+- `b05920a`: admin-issued app tokens; latest implementation commit before this save.
 
 Repository was created private and pushed to GitHub during this session. Git ignores
 `.env`, `.admin-credentials`, `.venv`, caches, `data/`, egg-info. Initial staged source
@@ -303,7 +307,10 @@ no age expiry or automatic regeneration on voice/model changes. Missing audio ca
 be regenerated. Source tests cover persistent reuse, variant isolation, legacy
 adoption, new track references, cooldown fairness and newly arriving requests.
 
-## Latest update: catalog selection and exact-track queue APIs (2026-09-09)
+## Earlier update: catalog selection and exact-track queue APIs (2026-09-09)
+
+Historical implementation note: the following original public/session authentication
+was replaced by bearer app tokens in the next section. Use that newer contract.
 
 Added `app/catalog_api.py`, API routes and `tests/test_catalog_api.py`.
 - GET `/api/catalog/genres`: public selectable genre/count list.
@@ -334,3 +341,86 @@ The three gated routes are `/api/catalog/genres`, `/api/catalog/tracks`, `/api/q
 Website listener routes are unchanged. Scope is browse+queue; no expiration setting.
 115 tests pass, covering hashed storage, one-time response, masking, revocation,
 missing/invalid auth, admin checks, pagination and app-specific request idempotency.
+
+
+## Handoff refresh: 2026-09-10
+
+The user requested another full session handoff. Repository was clean at the start,
+on `main`, with implementation HEAD `b05920a`; all prior implementation changes were
+pushed to the private `lotusbaba/radioworkx` repository. No new application changes
+were requested after token management. No unfinished feature request is known.
+This update preserves the earlier detailed context and adds the latest discussions.
+
+### Current integration API contract (use this, not the historical cookie example)
+
+- `GET /api/catalog/genres`: genre/count list, requires app bearer token.
+- `GET /api/catalog/tracks?genre=jazz&genre=funk`: multiple genres (OR), optional `q`,
+  paginated, default 20/max 100, requires app bearer token.
+- `POST /api/queue`: JSON `track_id` and optional UUID `request_id`, bearer token;
+  no listener cookie. App-token identity controls retry idempotency and 10/min rate
+  limit. Exact track request enters normal FIFO/SQS processing; existing eligibility
+  and permanent music download cap remain in effect.
+- Header: `Authorization: Bearer <token>`. No Basic-auth or listener-cookie bypass.
+- Manage at `/admin` → **App API tokens**. Generate a labelled app token, copy and
+  hide or hide permanently. Full secret appears only on creation, never in list or
+  DB; only SHA-256 digest persists. Refresh/navigation removes the displayed secret.
+  Lost tokens cannot be recovered; revoke and replace. No auto-expiry.
+- Admin APIs: GET/POST `/api/admin/tokens`, DELETE `/api/admin/tokens/{token_id}`;
+  admin HTTP Basic required, mutation custom header `X-Admin-Action: tokens` plus
+  origin check. Pagination, created/last-use/revoked timestamps, masked list.
+- Revocation immediately denies subsequent authentication, but does not cancel
+  already accepted requests. Public station UI continues with its listener sessions.
+- Live browser verification generated a token named **Browser verification (revoked
+  after check)** and revoked it afterward; a revoked test entry may appear in admin.
+  It tested one-time reveal, clearing after copy, reload masking, authenticated read,
+  and rejection after revocation. No live song was queued by that check.
+- Optional repeat check: `scripts/browser_smoke.py --admin-check --token-check
+  --read-only --url https://radioworkx.tail060b33.ts.net`. This creates and revokes a
+  temporary token, so it is not a purely read-only operation despite the station
+  portion using `--read-only`. Token text must never be logged or screenshotted.
+
+### Latest explanatory discussions
+
+**Frontend:** plain JavaScript, HTML and CSS, no TypeScript or frontend framework.
+Listener frontend: `app/static/index.html`, `app/static/app.js`,
+`app/static/style.css`, `app/static/cassette.svg`. Admin frontend:
+`app/admin_assets/`. FastAPI serves these directly; no separate frontend server.
+
+**SQLite:** embedded in API/worker processes, not a separate database server or
+network service. Live database `/data/live/radio.db` in the shared named Docker
+volume `radio-data` managed by Docker Desktop on this Mac. Multiple containers
+access the shared file. No Postgres instance is implemented.
+
+**Persistence:** named volumes survive container stops, crashes, restarts, rebuilds,
+and recreation. Ordinary `docker compose down` preserves them. Explicit volume
+removal (`docker compose down -v`, deleting in Docker Desktop) or Docker Desktop
+data reset can erase them. Disk failure is also a risk. Persistence is not a backup.
+No database/media backup, automated backup job, or restore exercise was performed
+by this session-handoff request; do not claim otherwise. Do not run destructive
+volume commands just to troubleshoot station state.
+
+**Portfolio copy supplied:**
+“I built and host RadioWorkx, a live radio station streaming Creative Commons–licensed
+music from Bandcamp and the Internet Archive, with scheduling that enforces
+SoundExchange performance-complement limits. It features conversational AI song
+requests, AI-generated DJ introductions, live emoji reactions, and community-driven
+music discovery.”
+Stack: FastAPI, JavaScript, SQLite, Redis, SQS and S3 via LocalStack, OpenAI APIs,
+Docker, Tailscale Funnel. The user suggested Postgres in draft copy, but SQLite was
+correctly used in the final copy. Scheduling implementation is not a blanket claim
+of legal/licensing compliance for every possible broadcast.
+
+### Resume checklist
+
+1. Read `AGENTS.md`, this handoff and README.md. Inspect git status before edits.
+2. Treat current URL as `https://radioworkx.tail060b33.ts.net/`; older Mac hostname
+   in incident history is historical. Check Funnel if reachability changes again.
+3. Retain local `.env` and ignored `.admin-credentials`; do not print their contents.
+4. Video generation remains paused (`VIDEOS_ENABLED=0` last applied); stored videos
+   can play. Intros remain enabled, queued ahead and permanently reused via track refs.
+5. Do not infer current music/queue counts from earlier observations. Inspect live
+   state only if needed. Services can use different image versions after targeted
+   deploys; the latest API image includes token management, station image includes
+   queue-based persistent intros. No redeploy was required for this handoff.
+6. The handoff is a curated continuation record, not a raw transcript, runtime-volume
+   snapshot, or credential backup. GitHub contains source/docs/tests, not live media.

@@ -127,7 +127,8 @@ function tick(){
   $('elapsed').textContent=time(elapsed);$('duration').textContent=time(p.ends-p.starts);$('progress').style.width=`${Math.max(0,elapsed/(p.ends-p.starts)*100)}%`;
 }
 setInterval(tick,1000);
-function stop(){tuned=false;audio.pause();audio.removeAttribute('src');audio.load();document.body.classList.remove('playing');$('play-icon').textContent='▶';$('play-label').textContent='Tune in';$('audio-status').textContent='Live together, wherever you are.';}
+let reconnectTimer=null,reconnectAttempt=0,playbackEpoch=0;
+function stop(){playbackEpoch++;clearTimeout(reconnectTimer);reconnectTimer=null;reconnectAttempt=0;tuned=false;audio.pause();audio.removeAttribute('src');audio.load();document.body.classList.remove('playing');$('play-icon').textContent='▶';$('play-label').textContent='Tune in';$('audio-status').textContent='Live together, wherever you are.';}
 async function startPlayback(automatic=false){
   if(tuned)return;
   autoplayBlocked=false;
@@ -135,8 +136,9 @@ async function startPlayback(automatic=false){
   audio.src='/api/live';audio.volume=Number($('volume').value);
   // Create/resume Web Audio in a user gesture; do not route successful autoplay into a suspended context.
   if(!automatic)enableAnalyser();
+  const epoch=++playbackEpoch;
   try{await audio.play();if(automatic && navigator.userActivation?.hasBeenActive)enableAnalyser();}
-  catch(e){if(tuned){stop();autoplayBlocked=e.name==='NotAllowedError';$('audio-status').textContent=autoplayBlocked?'Tap anywhere to enable sound — your browser blocked autoplay.':'Playback could not start. Try tuning in again.';}}
+  catch(e){if(tuned&&epoch===playbackEpoch){if(e.name==='NotAllowedError'){stop();autoplayBlocked=true;$('audio-status').textContent='Tap anywhere to enable sound — your browser blocked autoplay.';}else reconnectAudio();}}
 }
 function enableAnalyser(){
   try{
@@ -177,9 +179,24 @@ $('motion-toggle').onclick=()=>{if(videoFailed){videoFailed=false;motionPaused=f
 $('track-video').addEventListener('error',()=>{if(visualURL){videoFailed=true;if(state)syncVisual(state);}});
 reduceMotion.addEventListener('change',()=>{motionPaused=reduceMotion.matches;if(state)syncVisual(state);});
 document.addEventListener('visibilitychange',()=>{if(state)syncVisual(state);});
-audio.onplaying=()=>{enableAnalyser();document.body.classList.add('playing');$('audio-status').textContent='You’re on the live frequency.';};
+audio.onplaying=()=>{clearTimeout(reconnectTimer);reconnectTimer=null;reconnectAttempt=0;enableAnalyser();document.body.classList.add('playing');$('audio-status').textContent='You’re on the live frequency.';};
 audio.onwaiting=()=>{if(tuned)$('audio-status').textContent='Waiting for the live signal…';};
-audio.onerror=()=>{if(tuned){stop();$('audio-status').textContent='Signal interrupted. Tune in to reconnect.';}};
+function reconnectAudio(){
+  if(!tuned||reconnectTimer)return;
+  document.body.classList.remove('playing');
+  $('audio-status').textContent='Signal interrupted. Reconnecting to the live frequency…';
+  const delay=Math.min(1000*2**reconnectAttempt++,10000);
+  reconnectTimer=setTimeout(async()=>{
+    reconnectTimer=null;if(!tuned)return;
+    const epoch=++playbackEpoch;
+    audio.src='/api/live?reconnect='+Date.now();audio.load();
+    try{await audio.play();}
+    catch(e){if(tuned&&epoch===playbackEpoch){if(e.name==='NotAllowedError'){stop();autoplayBlocked=true;$('audio-status').textContent='Tap to resume the live frequency.';}else reconnectAudio();}}
+  },delay);
+}
+audio.onerror=reconnectAudio;
+audio.onended=reconnectAudio;
+audio.onstalled=reconnectAudio;
 $('volume').oninput=(e)=>{audio.volume=Number(e.target.value);};
 const events=new EventSource('/api/events');
 events.addEventListener('snapshot',e=>{try{showStatus(JSON.parse(e.data));}catch(err){console.error(err);}});

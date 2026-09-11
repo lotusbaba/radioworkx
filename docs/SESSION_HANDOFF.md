@@ -11,9 +11,9 @@ cookies, or raw private listener conversations in this document.
 - GitHub: private repository https://github.com/lotusbaba/radioworkx ; branch `main`.
 - Current public site: https://radioworkx.tail060b33.ts.net/ . No Tailscale client required for visitors.
 - Admin: same origin, `/admin`; username `admin`, password stored locally in ignored `.admin-credentials` and `.env`.
-- Latest verified application tests: **115 passed** after app-token changes. Live admin token creation/hiding/revocation and desktop/mobile browser checks passed. Tests were not rerun for this documentation-only handoff.
-- Last completed discussion: portfolio summary, SQLite location, and named-volume persistence. Latest implementation: admin-issued bearer tokens for calling apps. Details below.
-- No known unfinished feature request at handoff. Live state changes; do not assume old track names, counters, or worker states remain current.
+- Latest verified application tests: **128 passed** across the full suite and the added deployment recovery check. Browser audio/SSE reconnection across a real rollout, read-only desktop/mobile checks, and rollback passed.
+- Latest implementation: Compose API replacement through Nginx. Public Funnel now proxies to **127.0.0.1:8001**. Read the final deployment section before operating containers; the active service can be `api` or `api-next`.
+- Experimental ELB work is in draft PR https://github.com/lotusbaba/localstack/pull/1. It has local validation; AWS parity remains outstanding. The live SQS/S3 image is unchanged.
 - User prefers implementing fixes directly, preserving earlier requirements, and avoiding repeated confirmation. Never expose credentials. Use approval escalation if a needed operation is blocked by the sandbox.
 
 Start by reading this file and README.md, then `git status --short` and recent commits.
@@ -485,3 +485,40 @@ A second flow covers mood RAG retrieval, confirmation state, genre variety selec
 request FIFO and broadcast linkage. Examples distinguish SQLite records from SQS
 messages and identify each worker/container. Documentation only; verified against
 current source and with `git diff --check`; no runtime changes or deployment.
+
+## Compose API replacement and rollback (2026-09-10)
+
+Implemented `scripts/deploy.py` with init/deploy/rollback/status/resume commands,
+immutable image IDs, a host lock, durable switch/drain state, readiness checks,
+Nginx graceful reload and bounded draining. `api` and `api-next` alternate; one
+API normally runs. Workers/station remain separate and were not restarted.
+The live Funnel route now targets **http://127.0.0.1:8001** (Nginx), not port 8000.
+Use the proxy endpoint for all checks; the old direct API slot may be stopped.
+Current live drain window is 30 seconds; initialization default is 60 seconds.
+Keep ignored `.deploy/` state/config and rollback images. Use the deployment script
+for API changes; an unqualified Compose rebuild bypasses its release selection.
+
+The first migration stopped the legacy API before Funnel was repointed, causing
+an interruption. Funnel was then changed to the verified proxy endpoint; subsequent
+rollouts and rollback use the stable proxy. No SQLite/history/volume reset occurred.
+
+Player now retries live audio after error/end/stall and cancels retries on tune-out.
+Verified actual browser audio and SSE reconnect across a same-image container
+replacement using `scripts/deployment_smoke.py`. The rollback command also passed.
+Read-only desktop/mobile/browser audio checks passed with no JavaScript errors.
+128 pytest tests pass, including five deployment recovery tests. An initial broad
+browser check hit an old chat-wording assertion; focused read-only/deployment checks
+were used for this change. Database migrations still need backward compatibility.
+
+A separate ELBv2 HTTP provider PR is being prepared in lotusbaba/localstack from
+`/private/tmp/radioworkx-localstack-elb`, branch `feat/elbv2-http-streaming`.
+The radio continues using the existing pinned LocalStack image for SQS/S3; its
+runtime does not depend on merging the experimental ELB provider. See follow-up
+entry for the PR URL and final verification.
+
+ELB PR opened: https://github.com/lotusbaba/localstack/pull/1 (draft), commit
+`15183d6af`. Seven local provider tests and one boto3/HTTP gateway test passed,
+including an idle stream closed at its drain deadline. AWS parity validation remains
+outstanding and limitations are explicit in the PR. No production LocalStack upgrade
+was performed. Same-image radio rollouts now preserve the previous distinct release
+instead of replacing the rollback image with the same image.

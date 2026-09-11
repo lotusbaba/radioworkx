@@ -53,13 +53,28 @@ services:
     restart: unless-stopped
   api:
     <<: *app
-    environment:
+    image: ${RADIO_API_IMAGE:-radioworkx-api:local}
+    environment: &api-env
       <<: *env
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_CHAT_MODEL: ${OPENAI_CHAT_MODEL:-gpt-4.1-mini}
       OPENAI_CHAT_DAILY_LIMIT: ${OPENAI_CHAT_DAILY_LIMIT:-500}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
     ports: ["127.0.0.1:${RADIO_PORT:-8000}:8000"]
+    stop_grace_period: 15s
+  api-next:
+    <<: *app
+    image: ${RADIO_NEXT_IMAGE:-radioworkx-api:local}
+    environment: *api-env
+    profiles: [deployment]
+    stop_grace_period: 15s
+  proxy:
+    image: nginx:1.28-alpine
+    profiles: [deployment]
+    ports: ["127.0.0.1:${RADIO_PROXY_PORT:-8001}:8080"]
+    volumes:
+      - ./.deploy/nginx:/etc/nginx:ro
+    restart: unless-stopped
   dispatcher:
     <<: *app
     command: ["python", "-m", "app.workers", "dispatch"]

@@ -31,7 +31,7 @@ docker compose logs -f station reactions downloads dispatcher
 docker compose down    # stops services; retains the library, votes, and history
 ```
 
-The LocalStack image is built directly from fork revision `8b9a79f05846835cf4dff63ab7eefdde9df83783`, with that revision’s checked-in runtime dependency pins. It does not silently substitute the upstream Docker image. Only SQS is enabled; no Docker socket mount or cloud credentials are needed. Redis runs separately, as requested, rather than emulating ElastiCache.
+The LocalStack image is built directly from fork revision `8b9a79f05846835cf4dff63ab7eefdde9df83783`, with that revision’s checked-in runtime dependency pins. It does not silently substitute the upstream Docker image. SQS and S3 are enabled; no Docker socket mount or cloud credentials are needed. Redis runs separately, as requested, rather than emulating ElastiCache.
 
 ## Requirements and implemented behavior
 
@@ -1163,3 +1163,93 @@ to `jobs`, selected `tracks`, and broadcast history. “Retry pending” was der
 from saved job/track state, not an SQS query or the reaction POST response. The
 latest follow-up can remain visible after playback until another boost replaces
 it, which is why source and follow-up broadcast timestamps are shown separately.
+
+## API deployments with temporary container overlap
+
+The live entry point now uses **Funnel → Nginx on host loopback port 8001 → API**.
+`api` and `api-next` are two Compose slots for the same FastAPI application. One
+normally runs; the deployment script starts the other, waits for `/health`, reloads
+Nginx to route new requests there, drains old proxy workers, then stops the previous
+API container. The station scheduler and queue workers are separate and remain
+running throughout. There is one common radio feed in Redis.
+
+```text
+Before:  Funnel → proxy → api (release A)
+Deploy:  Funnel → proxy → api (release A)
+                         api-next (release B starts and passes readiness)
+Switch:  Funnel → proxy → api-next (new requests)
+                         api (existing streams drain)
+After:   Funnel → proxy → api-next; api stopped, old image retained
+```
+
+For a new installation, start the normal Compose services first. Initialize the
+proxy **before the first managed deployment**, then point public traffic at it:
+
+```sh
+.venv/bin/python scripts/deploy.py init --drain-seconds 60
+curl --fail http://127.0.0.1:8001/health
+# For this station's existing Tailscale Funnel setup:
+tailscale funnel --bg --https=443 http://127.0.0.1:8001
+```
+
+`RADIO_PROXY_PORT` can override 8001, independently of the legacy `RADIO_PORT`
+(default 8000). The old direct API port is not a stable entry point after adopting
+managed deployments: that slot may be stopped. Use the proxy for the website,
+admin, API clients, health monitoring, and browser checks. Initializing the proxy
+does not restart the running API. The live installation currently uses a **30-second**
+drain window; the script's initialization default is 60 seconds.
+
+```sh
+# Build current source into a uniquely tagged image and deploy only FastAPI:
+.venv/bin/python scripts/deploy.py deploy
+
+# Or deploy an already available local image:
+.venv/bin/python scripts/deploy.py deploy --image radioworkx-api:release-tag
+
+# Replace the API with the previous recorded immutable image:
+.venv/bin/python scripts/deploy.py rollback
+
+# Inspect the active slot/images and verify the proxy route:
+.venv/bin/python scripts/deploy.py status
+
+# Recover an interrupted switch and finish pending draining:
+.venv/bin/python scripts/deploy.py resume
+```
+
+The script serializes deployments with a file lock. It records immutable Docker
+image IDs, active/previous releases and interrupted-switch state under ignored
+`.deploy/`; generated Nginx configuration is in `.deploy/nginx/`. Keep this directory
+across deployments/reboots. Same-image restarts preserve the previous distinct release for rollback.
+Image tags and images must remain available locally;
+do not prune rollback images. A failed candidate readiness check leaves the current
+route serving. A switch interrupted after proxy reload is recovered by observing
+which upstream actually answers before stopping either container.
+
+Nginx forwards audio/SSE incrementally with response buffering disabled. Existing
+streams remain on the old Nginx workers until they finish or the drain deadline.
+The browser reconnects live audio on error, end, or stall with bounded backoff;
+SSE reconnects through EventSource. This is not a promise of gapless audio at the
+drain deadline. Pages loaded before the reconnection change need one refresh to
+receive the updated player. Tuning out cancels scheduled reconnection attempts.
+
+Both API slots mount the same `radio-data` volume and use the same session secret,
+Redis, SQS, and media configuration. SQLite still has one writer at a time. API
+startup performs normal database initialization; schema changes must remain
+compatible with the old application during overlap and rollback. Application
+rollback does not undo database migrations. This workflow is for a **single Docker
+host**, not a distributed SQLite deployment.
+
+After adopting this workflow, use the script for API releases instead of an
+unqualified `docker compose up -d --build`, which can recreate services outside
+the deployment controller. Worker and dependency upgrades require their own
+planned procedure; they are not included in an API rollout. The proxy is itself
+one container, so its crash/restart can interrupt connections.
+
+Verification:
+
+```sh
+.venv/bin/python -m pytest -q
+.venv/bin/python scripts/browser_smoke.py --url http://127.0.0.1:8001 --read-only --audio-check --allow-autoplay
+# Explicitly performs a real rollout of the current image while a browser listens:
+.venv/bin/python scripts/deployment_smoke.py
+```

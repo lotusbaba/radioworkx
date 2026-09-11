@@ -12,7 +12,7 @@ def selectable(c):
     rows=[]
     for row in c.execute('SELECT * FROM tracks ORDER BY id'):
         meta=json.loads(row['metadata'])
-        if bool(meta.get('demo'))!=DEMO:continue
+        if bool(meta.get('demo'))!=DEMO or row['status']=='failed':continue
         if row['status']!='ready' and (capped or not row['source'] or not row['rights']):continue
         rows.append((row,meta))
     return rows
@@ -57,7 +57,7 @@ def enqueue(track_id,listener,request_id):
         if row is None:raise HTTPException(404,'Track not found.')
         meta=json.loads(row['metadata'])
         if bool(meta.get('demo'))!=DEMO:raise HTTPException(404,'Track not found.')
-        if row['status']!='ready' and (library_only(c) or not row['source'] or not row['rights']):
+        if row['status']=='failed' or (row['status']!='ready' and (library_only(c) or not row['source'] or not row['rights'])):
             raise HTTPException(409,'This track is not currently available to queue.')
         now=time.time()
         if c.execute('SELECT COUNT(*) FROM requests WHERE listener=? AND created>?',(listener,now-60)).fetchone()[0]>=10:

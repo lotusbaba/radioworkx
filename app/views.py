@@ -34,7 +34,7 @@ def playlist_views(c, play, now):
             downloads.append({'job_id':job['id'],'kind':request['kind'],'metadata':None,'label':f"Requested genre: {request['discover_genre']}" if request.get('discover_genre') else None,'status':f"Finding eligible {request['discover_genre']} music from another album" if request.get('discover_genre') else 'Selecting tracks'})
             continue
         for id in plan['tracks']:
-            if id in plan.get('completed',[]):continue
+            if id in plan.get('completed',[]) or id in plan.get('failed',[]):continue
             row=c.execute('SELECT metadata,status,error FROM tracks WHERE id=?',(id,)).fetchone()
             if row:
                 downloads.append({'job_id':job['id'],'kind':request['kind'],'metadata':json.loads(row['metadata']),
@@ -97,8 +97,10 @@ def reaction_followup(c):
     target=None
     label='Selecting a follow-up'
     if plan and plan['tracks']:
-        target=c.execute('SELECT metadata,status,error,downloaded_at FROM tracks WHERE id=?',(plan['tracks'][0],)).fetchone()
-        if plan['tracks'][0] in plan.get('completed',[]):
+        targets=plan.get('completed',[])[-1:] or [t for t in plan['tracks'] if t not in plan.get('failed',[])] or plan['tracks'][-1:]
+        target_id=targets[0]
+        target=c.execute('SELECT metadata,status,error,downloaded_at FROM tracks WHERE id=?',(target_id,)).fetchone()
+        if target_id in plan.get('completed',[]):
             label='Downloaded' if target and target['downloaded_at'] is not None and target['downloaded_at']>=job['created'] else 'Reused from library'
         elif target:
             label='Retry pending' if target['error'] else 'Downloading' if target['status']=='downloading' else 'Queued for download'
@@ -156,6 +158,7 @@ def download_page(c, page=1, page_size=10, automatic=False):
         if row['failed']: status='Failed after retries'
         elif row['completed']: status='Downloaded' if row['downloaded_at'] is not None and row['downloaded_at']>=row['created'] else 'Reused from library'
         elif row['done']: status='No matching authorized tracks'
+        elif row['track_status']=='failed': status='Failed · archived'
         elif row['error']: status='Retry pending'
         elif row['track_status']=='downloading': status='Downloading'
         else: status='Queued' if row['track_id'] else 'Selecting tracks'

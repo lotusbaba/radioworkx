@@ -1,7 +1,7 @@
 const $=id=>document.getElementById(id);
 const node=(tag,text)=>{const e=document.createElement(tag);e.textContent=text;return e;};
 let tab='tracks',page=1,pages=1,version=0;
-const titles={tracks:'Tracks',hosts:'Source hosts',requests:'Requests and chat',reactions:'Reaction events',downloads:'Successful downloads',crawls:'Crawler runs',visuals:'Artwork videos',objects:'Stored objects'};
+const titles={tracks:'Tracks',hosts:'Source hosts',requests:'Requests and chat',reactions:'Reaction events',downloads:'Successful downloads',crawls:'Crawler runs',visuals:'Artwork videos',objects:'Stored objects','failed-downloads':'Failed downloads'};
 function dates(){const end=new Date();$('to').value=end.toISOString().slice(0,16);$('from').value=new Date(end-Number($('period').value)*86400000).toISOString().slice(0,16);}
 dates();
 function params(){const start=Date.parse($('from').value+'Z')/1000,end=Date.parse($('to').value+'Z')/1000;if(!Number.isFinite(start)||!Number.isFinite(end)||start>=end||end-start>366*86400)throw Error('Choose a valid date range of up to 366 days.');return new URLSearchParams({start,end});}

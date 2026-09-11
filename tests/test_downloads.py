@@ -91,14 +91,15 @@ def test_partial_job_retry_never_requeues_already_played(metadata,monkeypatch):
         if id==failed:raise RuntimeError('interrupted')
         return True
     monkeypatch.setattr(downloads,'acquire',acquire)
-    with pytest.raises(RuntimeError):downloads.process_job(event)
+    downloads.process_job(event)
     with db.transaction() as c:
         assert c.execute('SELECT COUNT(*) FROM playlist').fetchone()[0]==9
         c.execute('DELETE FROM playlist')  # station already played all nine
     monkeypatch.setattr(downloads,'acquire',lambda id:True)
     downloads.process_job(event)
     with db.connect() as c:
-        assert [r[0] for r in c.execute('SELECT track_id FROM playlist')]==[failed]
+        assert list(c.execute('SELECT track_id FROM playlist'))==[]
+        assert c.execute('SELECT COUNT(*) FROM failed_downloads').fetchone()[0]==1
 
 def test_prefers_ten_new_downloads_over_cached(metadata,monkeypatch):
     monkeypatch.setattr(downloads,'DEMO',False)
@@ -129,9 +130,11 @@ def test_request_fetch_clears_genre_only_on_success_and_retry_is_safe(metadata,m
     isolated.zadd('radio:genres',{'jazz':21,'folk':8})
     def fail(id):raise RuntimeError('Download failed')
     monkeypatch.setattr(downloads,'acquire',fail)
-    with pytest.raises(RuntimeError):downloads.process_job(job)
+    downloads.process_job(job)
     assert isolated.zscore('radio:genres','jazz')==21
     monkeypatch.setattr(downloads,'acquire',lambda id:True)
+    add('alternative',metadata)
+    job={**job,'id':'new-request-job','track_id':'alternative'}
     downloads.process_job(job)
     assert isolated.zscore('radio:genres','jazz') is None
     assert isolated.zscore('radio:genres','folk')==8

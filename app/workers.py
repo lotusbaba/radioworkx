@@ -39,6 +39,8 @@ def dispatch_once():
         queues.send(row['queue'],row['id'],json.loads(row['body']))
         with db.transaction() as c:
             c.execute('UPDATE outbox SET sent=? WHERE id=?',(time.time(),row['id']))
+            if row['queue']=='download-failures':
+                c.execute('UPDATE outbox SET done=? WHERE id=?',(time.time(),row['id']))
     return len(rows)
 
 
@@ -70,6 +72,11 @@ def consume_once(name, wait=10):
     for message in messages:
         try:
             event = json.loads(message['Body'])
+            with db.connect() as c:
+                finished=c.execute('SELECT done FROM outbox WHERE id=?',(event['id'],)).fetchone()
+            if finished and finished['done'] is not None:
+                queues.client().delete_message(QueueUrl=url,ReceiptHandle=message['ReceiptHandle'])
+                continue
             with visibility_lease(url,message['ReceiptHandle'],60 if name=='reactions' else 900):
                 if name == 'reactions':
                     project(process_reaction(event))

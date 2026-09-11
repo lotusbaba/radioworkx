@@ -16,6 +16,9 @@ def client():
 @lru_cache
 def queue(name):
     sqs = client()
+    if name=='download-failures':
+        return sqs.create_queue(QueueName=f'{os.getenv("QUEUE_PREFIX","radio")}-download-failures',
+                                Attributes={'MessageRetentionPeriod':'1209600'})['QueueUrl']
     dlq = sqs.create_queue(QueueName=f'{os.getenv("QUEUE_PREFIX","radio")}-{name}-dead')['QueueUrl']
     arn = sqs.get_queue_attributes(QueueUrl=dlq,AttributeNames=['QueueArn'])['Attributes']['QueueArn']
     return sqs.create_queue(QueueName=f'{os.getenv("QUEUE_PREFIX","radio")}-{name}',Attributes={

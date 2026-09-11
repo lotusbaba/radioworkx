@@ -188,7 +188,7 @@ def submit_local(query, mode, listener, request_id):
         capped = library_only(c)
         for row in c.execute('SELECT * FROM tracks ORDER BY id'):
             meta = json.loads(row['metadata'])
-            if bool(meta.get('demo')) != DEMO: continue
+            if bool(meta.get('demo')) != DEMO or row['status']=='failed': continue
             if row['status'] != 'ready' and (capped or not row['source'] or not row['rights']): continue
             catalog.append((row,meta))
         genres=sorted({meta['genre'] for _,meta in catalog})

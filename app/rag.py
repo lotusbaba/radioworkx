@@ -35,7 +35,7 @@ def catalog(c):
     capped = library_only(c)
     return [json.loads(row['metadata']) for row in c.execute('SELECT * FROM tracks ORDER BY id')
             if bool(json.loads(row['metadata']).get('demo')) == DEMO
-            and (row['status'] == 'ready' or (not capped and row['source'] and row['rights']))]
+            and row['status']!='failed' and (row['status'] == 'ready' or (not capped and row['source'] and row['rights']))]
 
 
 def retrieve(query, items):

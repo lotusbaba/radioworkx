@@ -756,3 +756,36 @@ neither the full token nor a decryptable copy is persisted. Revocation rejects
 subsequent calls immediately; already accepted track requests remain queued.
 Tokens have no automatic expiry. Admin credentials alone do not authorize the
 calling-app endpoints. `/docs` documents the AppToken bearer security scheme.
+
+### Failed downloads, alternatives and queue progress
+
+A failed music acquisition is recorded in the private `failed_downloads` table and
+sent through the durable outbox to the `download-failures` SQS queue (14-day message
+retention). Admin → **Failed downloads** provides searchable, dated, paginated
+records with job/track IDs, source URL, artist-page URL, exception type/message and
+replacement ID. URLs/details stay behind admin authentication; the public status
+contains only safe status labels. The SQLite archive persists beyond SQS retention.
+
+The failed track is quarantined (`status=failed`) so automatic acquisition, catalog
+API and chat do not select it again. Reaction, refill, recovery and genre-request
+jobs may choose another eligible same-genre track, keeping download-cap and playback
+rules. A job tries at most three replacements across its failures. Exact title/ID
+requests fail visibly instead of substituting an unrelated recording. A genre
+request replacement retains its FIFO request sequence. Successful alternatives
+fulfill genre demand; failed attempts do not clear reactions. If no replacement
+succeeds, the job terminates rather than repeatedly fetching the known-bad URL.
+
+Ordinary source failures are handled inside the job, then its original SQS message
+is acknowledged. The failure queue is an archive, not another download work queue.
+It has no consumer by design; admin reads durable SQLite records without consuming
+SQS messages. Failure notices are marked dispatched after sending, while retries of
+an interrupted send can produce duplicate notices with the same failure ID.
+
+Unexpected infrastructure/worker failures still use SQS retry/redrive: download
+messages are invisible for 900 seconds while owned (lease renewed while processing),
+then become available if not acknowledged; maxReceiveCount is 5, with per-work-queue
+dead-letter queues. These are Standard queues, not FIFO queues. Other messages remain
+available while one failed message is invisible. The application runs independent
+normal, priority and listener-request consumers, one message at a time per consumer.
+A slow active download can occupy its consumer, but does not block the other two.
+Completed outbox jobs are acknowledged without re-execution on duplicate delivery.

@@ -46,7 +46,7 @@ with sync_playwright() as p:
         if admin.locator('#next').is_enabled():
             admin.locator('#next').click()
             admin.wait_for_function('document.querySelector("#pagination").textContent.startsWith("Page 2")')
-        for title in ['Source hosts','Requests and chat','Reaction events','Successful downloads','Crawler runs','Artwork videos','Stored objects','Tracks']:
+        for title in ['Source hosts','Requests and chat','Reaction events','Successful downloads','Crawler runs','Artwork videos','Stored objects','Failed downloads','Tracks']:
             admin.get_by_role('button',name=title,exact=True).click()
             admin.wait_for_function('(title)=>document.querySelector("#table-title").textContent===title',arg=title)
         admin.screenshot(path=str(out/'admin-desktop.png'),full_page=True)

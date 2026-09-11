@@ -424,3 +424,29 @@ of legal/licensing compliance for every possible broadcast.
    queue-based persistent intros. No redeploy was required for this handoff.
 6. The handoff is a curated continuation record, not a raw transcript, runtime-volume
    snapshot, or credential backup. GitHub contains source/docs/tests, not live media.
+
+## Latest update: download failure archive and bounded replacement (2026-09-10)
+
+User saw 28 hip-hop reactions; follow-up “Eva Jinek's dream” failed with ValueError.
+Original behavior saved a fixed job plan and retried that same track. Added
+`app/download_failures.py`, `failed_downloads` SQLite archive and private admin tab.
+Failures archive source/page URL and error detail, quarantine track, and enqueue a
+notice to passive SQS `download-failures` (14d retention, SQLite persists longer).
+Discovery jobs try eligible same-genre alternatives (max3 replacements/job); genre
+requests preserve FIFO identity, exact track requests fail without substitution.
+Demand clears only on successful fetch. Job handles source failures and returns for
+SQS acknowledgment; no infinite known-bad track retry. Infrastructure failures retain
+visibility/redrive; completed duplicate deliveries are acknowledged without execution.
+Admin/API/dispatcher/downloads require deployment. Source tests: 117 passing before
+final live checks. Private failure URLs/details must not be logged publicly or exposed
+in public snapshots. Existing initial failure details cannot be reconstructed without
+another attempt; recorded historical errors were type-only.
+
+Live verification after deployment: two stuck jobs were resubmitted by setting their
+outbox sent timestamps to NULL (not deleting plans/history). Five source attempts
+were archived with `ValueError: Unsupported provider host`. The reaction job
+completed using cached “Don't get me down” as the alternative to “Eva Jinek's dream”.
+At that check, zero download work jobs remained pending and five failure notices
+were present in the SQS archive with none awaiting dispatch. Host-validation failures
+remain quarantined; no broadening of allowed provider hosts was performed. 119 source
+tests passed, including bounded alternatives and completed-message deduplication.

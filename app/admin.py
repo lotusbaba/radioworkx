@@ -104,7 +104,7 @@ def overview(start:float|None=None,end:float|None=None):
 
 
 @router.get('/api/admin/repository/{kind}')
-def repository(kind:Literal['tracks','hosts','requests','reactions','downloads','crawls','visuals','objects'],
+def repository(kind:Literal['tracks','hosts','requests','reactions','downloads','crawls','visuals','objects','failed-downloads'],
                page:int=Query(1,ge=1,le=1000000),page_size:int=Query(25,ge=1,le=100),
                q:str=Query('',max_length=100),start:float|None=None,end:float|None=None):
     start,end=window(start,end)
@@ -114,6 +114,7 @@ def repository(kind:Literal['tracks','hosts','requests','reactions','downloads',
         'requests':("requests r LEFT JOIN tracks t ON t.id=r.track_id","r.sequence,r.query,r.response,r.status,r.engine,r.created,json_extract(t.metadata,'$.title') AS title,r.listener",'r.query','r.sequence DESC','r.created'),
         'reactions':("reactions r LEFT JOIN plays p ON p.id=r.play_id","r.id,r.emoji,r.accepted,r.processed,json_extract(p.metadata,'$.title') AS title,json_extract(r.metadata,'$.genre') AS genre,json_extract(r.metadata,'$.artists') AS artists,r.play_id",'r.metadata','r.accepted DESC,r.id','r.accepted'),
         'downloads':("host_downloads d LEFT JOIN tracks t ON t.id=d.track_id","d.track_id,json_extract(t.metadata,'$.title') AS title,d.source_host,d.media_host,d.completed",'COALESCE(t.metadata,d.track_id)','d.completed DESC,d.track_id','d.completed'),
+        'failed-downloads':('failed_downloads f LEFT JOIN tracks t ON t.id=f.track_id',"f.id,f.job_id,f.track_id,json_extract(t.metadata,'$.title') AS title,f.kind,f.source_url,f.page_url,f.error_type,f.error_detail,f.created,f.replacement_id","COALESCE(t.metadata,'') || COALESCE(f.source_url,'') || f.error_detail",'f.created DESC,f.id','f.created'),
         'visuals':('track_visuals v LEFT JOIN tracks t ON t.id=v.track_id',"v.track_id,json_extract(t.metadata,'$.title') AS title,v.status,v.provider_id,v.created,v.completed,v.error",'COALESCE(t.metadata,v.track_id)','v.created DESC,v.track_id','v.created'),
         'objects':('media_objects m','m.object_key,m.track_id,m.kind,m.mime,m.checked','m.object_key','m.object_key',None),
         'crawls':('crawl_runs r','r.id,r.started,r.finished,r.pages,r.tracks,r.errors','r.id','r.started DESC,r.id','r.started')}

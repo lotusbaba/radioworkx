@@ -124,6 +124,8 @@ def plan_job(event):
 def reserve(track_id):
     with db.transaction() as c:
         row = c.execute('SELECT * FROM tracks WHERE id=?',(track_id,)).fetchone()
+        if row is None or row['status']=='failed':
+            raise ValueError('Track is quarantined after a failed download')
         if row['status'] == 'ready':
             return dict(row)
         if library_only(c):
@@ -241,9 +243,8 @@ def process_job(event):
     plan, done = plan_job(event)
     if done:
         return
-    failures = []
     for track_id in plan['tracks']:
-        if track_id in plan.get('completed',[]):
+        if track_id in plan.get('completed',[]) or track_id in plan.get('failed',[]):
             continue
         try:
             if acquire(track_id):
@@ -257,11 +258,22 @@ def process_job(event):
             elif plan['kind'] == 'request':
                 with db.transaction() as c:
                     c.execute("UPDATE requests SET status='failed',response=response || ' Download unavailable: the library limit has been reached.' WHERE id=? AND status='pending'",(event['request_id'],))
-        except Exception:
+        except Exception as error:
             log.error('Download failed for %s (source URL omitted)',track_id)
-            failures.append(track_id)
-    if failures:
-        raise RuntimeError('Retry failed tracks: '+', '.join(failures))
+            from app.download_failures import record,alternative
+            with db.transaction() as c:
+                failure_id,meta=record(c,event,track_id,error)
+                plan.setdefault('failed',[]).append(track_id)
+                replacement=alternative(c,event,plan,meta)
+                if replacement:
+                    plan['tracks'].append(replacement)
+                    c.execute('UPDATE failed_downloads SET replacement_id=? WHERE id=?',(replacement,failure_id))
+                if plan['kind']=='request':
+                    if replacement:
+                        c.execute("UPDATE requests SET track_id=?,response=response || ' Selecting another track in the requested genre after a download failure.' WHERE id=? AND status='pending'",(replacement,event.get('request_id')))
+                    else:
+                        c.execute("UPDATE requests SET status='failed',response=response || ' Download failed; please choose another track.' WHERE id=? AND status='pending'",(event.get('request_id'),))
+                c.execute('UPDATE jobs SET body=? WHERE id=?',(json.dumps(plan),event['id']))
     if plan['kind'] in {'boost','request'}:
         from app.events import fulfill_genre
         for track_id in plan.get('completed',[]):
@@ -270,6 +282,8 @@ def process_job(event):
             fulfill_genre(event['id'],track_id,event.get('genre',meta['genre']))
     with db.transaction() as c:
         c.execute('UPDATE jobs SET done=1 WHERE id=?',(event['id'],))
+        if plan.get('failed') and not plan.get('completed'):
+            c.execute("UPDATE outbox SET failed='Download failed; no eligible replacement completed' WHERE id=?",(event['id'],))
 
 
 def plan_refill(event):

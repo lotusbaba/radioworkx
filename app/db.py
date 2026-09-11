@@ -5,6 +5,12 @@ from contextlib import contextmanager
 from app.config import DATA
 
 SCHEMA = """
+CREATE TABLE IF NOT EXISTS failed_downloads (
+ id TEXT PRIMARY KEY, job_id TEXT NOT NULL, track_id TEXT NOT NULL,
+ kind TEXT NOT NULL, source_url TEXT, page_url TEXT, error_type TEXT NOT NULL,
+ error_detail TEXT NOT NULL, created REAL NOT NULL, replacement_id TEXT,
+ UNIQUE(job_id,track_id)
+);
 CREATE TABLE IF NOT EXISTS app_tokens (
  id TEXT PRIMARY KEY, name TEXT NOT NULL, digest TEXT NOT NULL UNIQUE,
  created REAL NOT NULL, last_used REAL, revoked REAL

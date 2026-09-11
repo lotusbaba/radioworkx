@@ -1,9 +1,18 @@
 """Public playlist and acquisition progress, without internal source URLs."""
 import json
 import hashlib
+import time
 from app import db
 from app.policy import eligible
 from app.requests import head, ordered_pending
+
+
+def broadcast_times(c, play_id):
+    row=c.execute('SELECT starts,ends,actual_end FROM plays WHERE id=?',(play_id,)).fetchone()
+    intro=json.loads(db.setting(c,'announcement_on_air','null'))
+    if not row or row['starts']>time.time() or (row['actual_end'] is not None and row['actual_end']<=row['starts']) or (intro and intro.get('play_id')==play_id):
+        return {'played_at':None,'finished_at':None}
+    return {'played_at':row['starts'],'finished_at':row['actual_end']}
 
 
 def playlist_views(c, play, now):
@@ -20,9 +29,10 @@ def playlist_views(c, play, now):
         requests.append({'metadata':meta,'duration':row['duration'],'status':label if label=='Ready' else 'Deferred · '+label,
                          'requested_by':'Listener '+hashlib.sha256(owner['listener'].encode()).hexdigest()[:6],'requested_at':owner['created']})
     community=[]
-    for row in c.execute("SELECT r.id,r.listener,r.created,r.status,t.metadata FROM requests r JOIN tracks t ON t.id=r.track_id WHERE r.track_id IS NOT NULL ORDER BY r.sequence DESC LIMIT 20"):
+    for row in c.execute("SELECT r.id,r.listener,r.created,r.status,r.play_id,t.metadata FROM requests r JOIN tracks t ON t.id=r.track_id WHERE r.track_id IS NOT NULL ORDER BY r.sequence DESC LIMIT 20"):
         community.append({'request_id':row['id'],'metadata':json.loads(row['metadata']),'requested_at':row['created'],
                           'requested_by':'Listener '+hashlib.sha256(row['listener'].encode()).hexdigest()[:6],
+                          **broadcast_times(c,row['play_id']),
                           'status':{'pending':'Queued','playing':'Now playing','played':'Played','failed':'Unavailable'}.get(row['status'],row['status'])})
     downloads=[]
     for job in c.execute("SELECT o.id,o.body AS request,o.failed,j.body AS plan FROM outbox o LEFT JOIN jobs j ON j.id=o.id WHERE o.queue IN ('downloads','priority-downloads','request-downloads') AND o.done IS NULL ORDER BY CASE WHEN o.queue='priority-downloads' THEN 0 ELSE 1 END,o.created"):
@@ -107,7 +117,18 @@ def reaction_followup(c):
     elif plan and job['done']:
         label='No matching authorized follow-up'
     if job['failed']:label='Fetch failed after retries'
+    target_times={'played_at':None,'finished_at':None}
+    if target and target_id in (plan or {}).get('completed',[]):
+        # Report this track's first broadcast after the fetch was fulfilled, not
+        # an older play or an unproven causal link to this particular boost job.
+        since=max(job['created'],target['downloaded_at'] or 0)
+        for played in c.execute('SELECT id FROM plays WHERE track_id=? AND starts>=? ORDER BY starts',(target_id,since)):
+            candidate_times=broadcast_times(c,played['id'])
+            if candidate_times['played_at'] is not None:
+                target_times=candidate_times;break
     return {'play_id':job['id'].removeprefix('boost:'),'source':json.loads(source['metadata']) if source else None,
+            'source_played_at':broadcast_times(c,job['id'].removeprefix('boost:'))['played_at'],
+            **target_times,
             'target':json.loads(target['metadata']) if target else None,'status':label,'genre':event.get('genre')}
 
 
@@ -173,9 +194,10 @@ def community_request_page(c, page=1, page_size=10):
     total=c.execute('SELECT COUNT(*)'+source).fetchone()[0]
     pages=max(1,(total+page_size-1)//page_size)
     page=min(page,pages)
-    rows=c.execute('SELECT r.id,r.listener,r.created,r.status,t.metadata'+source+
+    rows=c.execute('SELECT r.id,r.listener,r.created,r.status,r.play_id,t.metadata'+source+
                    ' ORDER BY r.created DESC,r.sequence DESC LIMIT ? OFFSET ?',(page_size,(page-1)*page_size))
     items=[dict(request_id=row['id'],metadata=json.loads(row['metadata']),requested_at=row['created'],
+                **broadcast_times(c,row['play_id']),
                 requested_by='Listener '+hashlib.sha256(row['listener'].encode()).hexdigest()[:6],
                 status={'pending':'Queued','playing':'Now playing','played':'Played','failed':'Unavailable'}.get(row['status'],row['status'])) for row in rows]
     return dict(items=items,total=total,page=page,pages=pages,page_size=page_size)

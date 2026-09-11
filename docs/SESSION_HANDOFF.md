@@ -450,3 +450,16 @@ At that check, zero download work jobs remained pending and five failure notices
 were present in the SQS archive with none awaiting dispatch. Host-validation failures
 remain quarantined; no broadening of allowed provider hosts was performed. 119 source
 tests passed, including bounded alternatives and completed-message deduplication.
+
+## Latest update: broadcast timestamps (2026-09-10)
+
+User asked to show when both reaction follow-ups and requested tracks played.
+`views.broadcast_times` reads music start/actual finish, suppressing future starts,
+intro-only/interrupted reservations and active intros. Paginated and SSE community
+requests use their exact requests.play_id association; UI distinguishes Requested,
+Played, Finished and Not played yet. Reaction follow-up includes source_played_at
+and first subsequent target broadcast after job creation/audio availability. No
+historical causal boost-play linkage is claimed. 121 tests pass, including exact
+request association and exclusion of earlier/future reaction target broadcasts.
+Deferred idea remains unimplemented: no replacement → request same-genre crawl and
+keep job pending until new music arrives. User explicitly asked to hold that thought.

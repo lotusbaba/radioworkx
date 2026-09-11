@@ -789,3 +789,16 @@ available while one failed message is invisible. The application runs independen
 normal, priority and listener-request consumers, one message at a time per consumer.
 A slow active download can occupy its consumer, but does not block the other two.
 Completed outbox jobs are acknowledged without re-execution on duplicate delivery.
+
+### Broadcast times in request and reaction history
+
+“What listeners asked for” shows the submission time separately from **Played** and
+**Finished** times, using the request's exact `play_id` link. Pending requests show
+**Not played yet**. Times use the viewer's local timezone and include the date.
+Reaction follow-ups show the original broadcast time and the selected track's first
+recorded broadcast after the follow-up job was created/audio became available.
+There is no historical boost-to-play foreign key, so this reports when that track
+was next broadcast, not proof it played exclusively because of that boost. Old
+plays before the job are excluded. Future reservations and active introductions
+are not presented as completed music starts. The follow-up remains latest-discovery
+history; its timestamp makes old activity identifiable.

@@ -39,7 +39,9 @@ function showStatus(s){
   if(follow){
     const source=follow.source?.title || 'the previous track';
     const target=follow.target?`“${follow.target.title}” by ${follow.target.artists.join(' & ')} (${follow.target.genre})`:'a matching song';
-    $('reaction-followup').textContent=`Reactions to “${source}” → ${target} · ${follow.status}`;
+    const sourceTime=follow.source_played_at?` (broadcast ${new Date(follow.source_played_at*1000).toLocaleString()})`:'';
+    const playedTime=follow.played_at?` · Follow-up track played ${new Date(follow.played_at*1000).toLocaleString()}`:' · Follow-up not played yet';
+    $('reaction-followup').textContent=`Reactions to “${source}”${sourceTime} → ${target} · ${follow.status}${playedTime}`;
   }
   $('energy-fill').style.width=`${Math.min(100,total/(s.threshold+1)*100)}%`;
   $('emojis').replaceChildren(...s.emojis.map(emoji=>{
@@ -267,7 +269,8 @@ function queueItem(entry,i){
     details.append(node('strong',m?.title || entry.label || (entry.kind==='boost'?'Reaction-inspired selection':entry.kind==='request'?'Listener request':entry.kind==='recovery'?'Finding eligible new music':'Automatic ten-track batch')),node('span',m?`${m.artists.join(' & ')} · ${m.genre}`:'The downloader is preparing this request.'));
     if(entry.updated_at)details.append(node('small',new Date(entry.updated_at*1000).toLocaleString()));
     if(entry.selection)details.append(node('small',entry.selection));
-    if(entry.requested_by)details.append(node('small',`${entry.requested_by} · ${new Date(entry.requested_at*1000).toLocaleString()}`));
+    if(entry.requested_by)details.append(node('small',`${entry.requested_by} · Requested ${new Date(entry.requested_at*1000).toLocaleString()}`));
+    if(entry.requested_by)details.append(node('small',entry.played_at?`Played ${new Date(entry.played_at*1000).toLocaleString()}${entry.finished_at?' · Finished '+new Date(entry.finished_at*1000).toLocaleString():''}`:entry.status==='Played'?'Broadcast time unavailable':'Not played yet'));
     if(entry.kind)details.append(node('small',entry.kind==='boost'?'Reaction threshold':entry.kind==='request'?'Listener request':entry.kind==='recovery'?'No eligible music · recovery':'Automatic refill'));
     row.append(node('span',String(i+1).padStart(2,'0'),'queue-number'),details,node('span',entry.status,'queue-status'));
     row.classList.toggle('is-current',entry.status==='Now playing'||entry.status==='Downloading');

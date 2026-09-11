@@ -26,6 +26,25 @@ def eligible_genre_tracks(c, genre, now=None):
     return result
 
 
+def choose_genre_track(c, genre, now=None):
+    """Favor discovery, then the least recently played/requested eligible track."""
+    now=time.time() if now is None else now
+    choices=eligible_genre_tracks(c,genre,now)
+    if not choices:return None
+    used={r['track_id']:r['last_used'] for r in c.execute(
+        "SELECT track_id,MAX(at) AS last_used FROM (SELECT track_id,starts AS at FROM plays UNION ALL SELECT track_id,created AS at FROM requests WHERE track_id IS NOT NULL AND status!='failed') GROUP BY track_id")}
+    # Do not choose a currently airing or already pending request track.
+    active={r[0] for r in c.execute('SELECT track_id FROM plays WHERE starts<=? AND ends>? AND actual_end IS NULL',(now,now))}
+    choices=[pair for pair in choices if pair[0]['id'] not in active]
+    if not choices:return None
+    oldest=min(used.get(row['id'],float('-inf')) for row,_ in choices)
+    pool=[pair for pair in choices if used.get(pair[0]['id'],float('-inf'))==oldest]
+    # Uniform artist groups avoid one prolific artist dominating the pool.
+    artists={}
+    for pair in pool:artists.setdefault(tuple(sorted(pair[1]['artists'])),[]).append(pair)
+    return random.choice(random.choice(list(artists.values())))
+
+
 def refresh_genre_head(c, now):
     """Continue discovery for deferred requests as well as the next request."""
     for request in c.execute("SELECT * FROM requests WHERE status='pending' ORDER BY sequence").fetchall():
@@ -43,8 +62,8 @@ def refresh_genre_request(c, now, request):
     history = [dict(p, metadata=json.loads(p['metadata'])) for p in c.execute('SELECT * FROM plays ORDER BY starts')]
     current = c.execute('SELECT metadata FROM tracks WHERE id=?',(request['track_id'],)).fetchone()
     if current and eligible(json.loads(current['metadata']), history, now): return
-    choices = eligible_genre_tracks(c, genre, now)
-    if not choices:
+    choice = choose_genre_track(c, genre, now)
+    if not choice:
         if library_only(c): return
         key = 'request-discovery:' + request['id']
         active = c.execute("SELECT 1 FROM outbox WHERE done IS NULL AND json_extract(body,'$.discover_genre')=?",(genre,)).fetchone()
@@ -53,7 +72,7 @@ def refresh_genre_request(c, now, request):
                     {'kind':'request','discover_genre':genre,'request_id':request['id']})
             db.set_setting(c,key,now)
         return
-    row, meta = random.choice(choices)
+    row, meta = choice
     response = f"Selected “{meta['title']}” by {' & '.join(meta['artists'])} for your {genre} request because the previous selection reached a playback limit. Your request keeps its FIFO position."
     c.execute('UPDATE requests SET track_id=?,response=?,requested_genre=?,sources=? WHERE id=?',
               (row['id'],response,genre,json.dumps([{k:meta.get(k) for k in ('id','title','bandcamp_url')}]),request['id']))
@@ -212,8 +231,8 @@ def submit_local(query, mode, listener, request_id):
             top=[match for match in matches if match[0]==matches[0][0]]
             _, row, meta = random.choice(top) if search_mode in {'genre','artist','album'} else matches[0]
             if search_mode == 'genre':
-                choices = eligible_genre_tracks(c, meta['genre'])
-                if choices: row, meta = random.choice(choices)
+                choice = choose_genre_track(c, meta['genre'])
+                if choice: row, meta = choice
             track_id, status = row['id'], 'pending'
             position = c.execute("SELECT COUNT(*) FROM requests WHERE status='pending'").fetchone()[0] + 1
             response = f"Queued “{meta['title']}” by {' & '.join(meta['artists'])} at request position {position}, ahead of automatic selections when eligible. Blocked or downloading requests are deferred."

@@ -463,3 +463,15 @@ historical causal boost-play linkage is claimed. 121 tests pass, including exact
 request association and exclusion of earlier/future reaction target broadcasts.
 Deferred idea remains unimplemented: no replacement → request same-genre crawl and
 keep job pending until new music arrives. User explicitly asked to hold that thought.
+
+## Latest update: genre-request variety (2026-09-10)
+
+User reported repeated ambient selections, e.g. Cylinder One. Live catalog had 425
+available and 37 ready ambient tracks; it was not a one-track catalog. Earlier
+Cylinder One request records were mostly not tagged requested_genre, so those
+records do not prove a SQL first-row genre selection bug. Existing genre paths used
+uniform random choice without recency preference. Added shared choose_genre_track
+for basic chat, RAG explicit/confirmed genre requests and deferred genre replacements:
+prefer never played/requested, otherwise least recently used; randomize tied artist
+groups then tracks. Exact track requests and offered-track confirmations remain
+exact. 123 tests pass, with tests for rotation, history ordering and exact titles.

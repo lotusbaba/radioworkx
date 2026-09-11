@@ -802,3 +802,10 @@ was next broadcast, not proof it played exclusively because of that boost. Old
 plays before the job are excluded. Future reservations and active introductions
 are not presented as completed music starts. The follow-up remains latest-discovery
 history; its timestamp makes old activity identifiable.
+
+Genre requests use a shared variety selector in both AI chat and basic search.
+Among policy-eligible tracks, it prefers songs never played or requested; once all
+have history, it picks the least recently played/requested track. Ties sample artist
+groups before tracks so a prolific artist does not dominate. Current broadcasts,
+quarantined sources and pending requests are excluded. Explicit title/ID requests
+and confirmation of an offered specific song preserve the selected identity.

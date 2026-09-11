@@ -189,7 +189,7 @@ def submit(query, mode, listener, request_id):
         if decision['action'] == 'request' and not track:
             reply = "I couldn't find that selection in the available catalog. Try another title, artist, album, or genre."
         with db.transaction() as c:
-            from app.requests import genre_intent, search_query, eligible_genre_tracks
+            from app.requests import genre_intent, search_query, choose_genre_track
             genre_request = None
             if track_id:
                 needle, search_mode = search_query(query, mode)
@@ -197,10 +197,9 @@ def submit(query, mode, listener, request_id):
                 if pending and decision['intent']=='confirmation' and not pending['track_ids'] and track['genre'] in pending['genres']:
                     genre_request = track['genre']
                 if genre_request:
-                    choices = eligible_genre_tracks(c, genre_request)
-                    if choices:
-                        import random
-                        _, track = random.choice(choices)
+                    choice = choose_genre_track(c, genre_request)
+                    if choice:
+                        _, track = choice
                         track_id = track['id']
             if track_id and track_id not in {item['id'] for item in catalog(c)}:
                 track_id, status = None, 'not_found'

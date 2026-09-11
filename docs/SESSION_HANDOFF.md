@@ -475,3 +475,13 @@ for basic chat, RAG explicit/confirmed genre requests and deferred genre replace
 prefer never played/requested, otherwise least recently used; randomize tied artist
 groups then tracks. Exact track requests and offered-track confirmations remain
 exact. 123 tests pass, with tests for rotation, history ordering and exact titles.
+
+## Worked flow documentation
+
+README now includes arrow diagrams with illustrative records/messages for reaction
+acceptance, per-broadcast threshold detection, outbox dispatch, SQS consumers,
+saved download plans, failure/replacement handling, Redis fulfillment and playback.
+A second flow covers mood RAG retrieval, confirmation state, genre variety selection,
+request FIFO and broadcast linkage. Examples distinguish SQLite records from SQS
+messages and identify each worker/container. Documentation only; verified against
+current source and with `git diff --check`; no runtime changes or deployment.

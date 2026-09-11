@@ -809,3 +809,357 @@ have history, it picks the least recently played/requested track. Ties sample ar
 groups before tracks so a prolific artist does not dominate. Current broadcasts,
 quarantined sources and pending requests are excluded. Explicit title/ID requests
 and confirmation of an offered specific song preserve the selected identity.
+
+## Worked data flows: reactions and conversational requests
+
+These examples show selected columns, with JSON columns expanded for readability.
+`PLAY-A`, `REACTION-21`, `REQUEST-2`, `TRACK-B`, and `FAILURE-1` are illustrative
+ID aliases, not literal UUIDs to submit to the API. `T0`, `T1`, etc. stand for Unix
+timestamps. Track titles in the reaction example come from the incident discussed
+above; the abbreviated records are explanatory, not a production database export.
+
+### Where each piece lives
+
+| Store | Table or queue | Purpose |
+| --- | --- | --- |
+| SQLite | `tracks` | Discovered catalog metadata, source URL, rights and audio status; `available` means cataloged, `ready` means downloaded. |
+| SQLite | `plays` | One row per broadcast, including `starts`, `ends`, `actual_end`; replaying a song creates a new play ID. |
+| SQLite | `reactions` | One row per accepted reaction, keyed by reaction ID; `play_id` identifies its broadcast. |
+| SQLite | `outbox` | Durable messages waiting for dispatch/completion, with queue name and instructions. |
+| SQLite | `jobs` | Download consumer's saved track plan and progress, keyed by the same application ID as its outbox message. |
+| SQLite | `failed_downloads` | Private source URL, page URL, error and replacement history for failed downloads. |
+| SQLite | `requests`, `rag_pending`, `rag_embeddings`, `rag_turns` | Chat/request history and FIFO sequence, pending confirmations, cached catalog vectors, and chat rate/busy accounting. |
+| SQLite | `playlist` | Automatic selections; accepted listener requests are scheduled separately from `requests`. |
+| LocalStack SQS | `radio-live-reactions`, `radio-live-priority-downloads`, `radio-live-request-downloads` | Work delivery; messages carry application IDs and instructions, not SQLite rows or audio. |
+| Redis | `radio:genres` sorted set | Outstanding community genre scores; this is not the per-broadcast trigger counter. |
+| Redis | `radio:events` stream | Public updates delivered through SSE. |
+
+Queue names use `QUEUE_PREFIX`; `radio-live` is the live configuration. SQS also
+assigns its own `MessageId` and a delivery-specific `ReceiptHandle`. Neither is
+the application job ID; the consumer uses the receipt handle to acknowledge delivery.
+`outbox` is the dispatch/completion ledger, while `jobs` is execution progress.
+There is no download `jobs` row for each individual reaction.
+
+### Reaction → trigger → download → broadcast
+
+This is the worked **“what happens after the 21st reaction POST?”** explanation.
+Follow the arrows in order: each record names its SQLite table, and each message
+names its SQS queue. The reaction consumer is already running before this begins.
+
+```text
+Station is broadcasting “Sex is the way” by Buzzy Boys
+SQLite plays:
+  {id: PLAY-A, track_id: TRACK-A, starts: T0, ends: T_END,
+   actual_end: null, metadata: {title: "Sex is the way", genre: "hip-hop", ...}}
+        ↓
+Browser → POST /api/reactions (listener session cookie)
+  {event_id: REACTION-21, play_id: PLAY-A, emoji: "🔥"}
+        ↓
+API container — service.accept_reaction()
+Validates current broadcast and 1-second listener cooldown.
+In ONE SQLite transaction:
+  reactions:
+    {id: REACTION-21, play_id: PLAY-A, listener: LISTENER-A,
+     emoji: "🔥", accepted: T1, processed: 0, metadata: EVENT}
+  EVENT = {id: REACTION-21, play_id: PLAY-A, listener: LISTENER-A,
+           emoji: "🔥", accepted: T1, ends: T_END, track_id: TRACK-A,
+           artists: ["Buzzy Boys"], genre: "hip-hop", album_id: "ia-onmp163"}
+  outbox:
+    {id: REACTION-21, queue: "reactions",
+     body: {id: REACTION-21, play_id: PLAY-A, listener: LISTENER-A,
+            emoji: "🔥", accepted: T1, ends: T_END, track_id: TRACK-A,
+            artists: ["Buzzy Boys"], genre: "hip-hop", album_id: "ia-onmp163"},
+     created: T1, sent: null, done: null, failed: null}
+HTTP 202 returns event_id, status:"queued", next_reaction_at and server_time.
+        ↓
+DISPATCHER WORKER — dispatcher container
+Polls SQLite outbox approximately every 0.5 seconds:
+  SELECT * FROM outbox
+  WHERE done IS NULL AND (sent IS NULL OR sent < :now_minus_1200_seconds)
+  ORDER BY created LIMIT 100;
+Finds REACTION-21 and sends this SQS radio-live-reactions message body:
+  {id: REACTION-21, play_id: PLAY-A, listener: LISTENER-A,
+   emoji: "🔥", accepted: T1, ends: T_END, track_id: TRACK-A,
+   artists: ["Buzzy Boys"], genre: "hip-hop", album_id: "ia-onmp163"}
+Then updates SQLite outbox REACTION-21: sent=T2, done=null.
+Message attributes include event_id, genre and artist.
+        ↓
+REACTION CONSUMER — reactions container
+Already long-polling SQS: it receives EVERY reaction, not only reaction 21.
+Receiving the message is what causes it to process REACTION-21.
+Loads the trusted reactions.metadata by event ID; marks processed:1 once:
+  UPDATE reactions SET processed=1 WHERE id='REACTION-21';
+SQLite reactions now contains separate rows (not one row with a count column):
+  id             play_id   emoji   processed
+  REACTION-1     PLAY-A    🔥      1
+  ...            ...      ...     ...
+  REACTION-20    PLAY-A    ❤️      1
+  REACTION-21    PLAY-A    🔥      1  ← was 0 before this consumer processed it
+Then executes:
+  SELECT COUNT(*) FROM reactions
+  WHERE play_id = 'PLAY-A' AND processed = 1;
+Result: 21 (assuming 20 other reactions for PLAY-A were processed).
+Inserting/processing a new reaction row makes COUNT(*) increase from 20 to 21.
+        ↓
+Threshold check inside this same consumer, not a SQLite database trigger:
+  count > THRESHOLD (default 20)
+  AND reaction accepted before track end
+  AND PLAY-A is still the active music broadcast when processed
+        ↓
+INSERT OR IGNORE a NEW SQLite outbox record:
+  {id: "boost:PLAY-A", queue: "priority-downloads",
+   body: {kind: "boost", artists: ["Buzzy Boys"], genre: "hip-hop",
+          album_id: "ia-onmp163", exclude: TRACK-A},
+   created: T3, sent: null, done: null, failed: null}
+        ↓
+REACTION CONSUMER also projects the reaction into Redis:
+  SADD radio:projected REACTION-21       (deduplicates redeliveries)
+  ZINCRBY radio:genres 1 hip-hop         (unless older than fulfillment cutoff)
+  XADD radio:events ... kind=reaction   (public fields only)
+Marks REACTION-21 outbox.done, then deletes that SQS delivery.
+        ↓
+DISPATCHER WORKER — same polling loop, separate outbox row
+Sends SQS radio-live-priority-downloads message:
+  {id: "boost:PLAY-A", kind: "boost", artists: ["Buzzy Boys"],
+   genre: "hip-hop", album_id: "ia-onmp163", exclude: TRACK-A}
+Updates boost outbox.sent:T4. The dispatcher does not select a song.
+At this point there is a boost outbox row and an SQS message, but no saved
+download plan yet. The next worker creates the jobs row.
+        ↓
+PRIORITY-DOWNLOAD CONSUMER — downloads container
+downloads.plan_job() first checks jobs.id = "boost:PLAY-A".
+If no saved plan, reads local SQLite tracks:
+  SELECT * FROM tracks
+  WHERE status IN ('available','ready')
+    AND id NOT IN (SELECT track_id FROM playlist);
+Python excludes active/source tracks and checks catalog/source/cap conditions.
+Randomly selects another same-artist OR same-album candidate;
+if that pool is empty, falls back to the source genre.
+Example selection: TRACK-B = “Eva Jinek's dream” by Oilboy's aftersun.
+The selected catalog row already exists in SQLite tracks:
+  {id: TRACK-B, status: "available", source: "https://source.example/audio.mp3",
+   metadata: {id: TRACK-B, title: "Eva Jinek's dream",
+              artists: ["Oilboy's aftersun"], genre: "hip-hop", ...}, ...}
+Saves SQLite jobs:
+  {id: "boost:PLAY-A", done: 0,
+   body: {kind: "boost", tracks: [TRACK-B], completed: []}}
+        ↓
+SAME PRIORITY-DOWNLOAD CONSUMER — downloads.acquire(TRACK-B)
+Reads tracks.source and metadata; validates source/rights and fetches audio.
+A ready track reuses downloaded audio. A new fetch becomes downloading → ready.
+        ↓
+SUCCESS PATH (failure branch below)
+SQLite jobs.body.completed = [TRACK-B], jobs.done = 1
+SQLite playlist: {position: 501, track_id: TRACK-B, priority: 1}
+  (unless already represented by a pending/playing listener request)
+Redis: fulfill_genre() removes hip-hop from radio:genres, saves a cutoff,
+       and publishes genre_fulfilled; later reactions can build a new score.
+Consumer marks boost outbox.done:T5 and deletes its SQS delivery.
+        ↓
+STATION WORKER — station container
+Selects ready candidates, giving eligible listener requests priority.
+Checks rolling artist/album/compilation and consecutive limits before broadcast.
+When selected, creates a NEW plays row for TRACK-B with start/end timestamps.
+A successful fetch means ready to schedule; it does not mean already played.
+```
+
+The SQL count grows because each accepted reaction inserts a **new row**. It is
+not a stored counter column being incremented. Redis separately increments genre
+scores. Reactions 22, 23, etc. on `PLAY-A` cannot create another `boost:PLAY-A`
+because `outbox.id` is unique. Replaying the song after three hours creates, for
+example, `PLAY-B`; crossing the threshold on that broadcast can create
+`boost:PLAY-B`. Delayed processing after a broadcast ends does not trigger its boost.
+Initial boost selection does not run the full scheduling eligibility check; the
+station always performs that check before playback.
+
+### Failure branch: same job, replacement plan
+
+```text
+PRIORITY-DOWNLOAD CONSUMER attempts TRACK-B → ValueError
+        ↓
+SQLite failed_downloads:
+  {id: FAILURE-1, job_id: "boost:PLAY-A", track_id: TRACK-B, kind: "boost",
+   source_url: "https://source.example/audio.mp3",
+   page_url: "https://source.example/album", error_type: "ValueError",
+   error_detail: "Unsupported provider host", created: T_FAIL,
+   replacement_id: null}
+SQLite tracks: TRACK-B status:"failed", error:"ValueError" (if not already ready)
+SQLite outbox:
+  {id: "failed-download:FAILURE-1", queue: "download-failures",
+   body: {failure_id: FAILURE-1, job_id: "boost:PLAY-A", track_id: TRACK-B,
+          kind: "boost", source_url: "https://source.example/audio.mp3",
+          page_url: "https://source.example/album", error_type: "ValueError",
+          error_detail: "Unsupported provider host"}, sent: null, done: null, ...}
+        ↓
+SAME PRIORITY-DOWNLOAD CONSUMER — download_failures.alternative()
+Reads local SQLite tracks, filters same genre, rights/cap and policy eligibility;
+excludes failed/planned/source tracks, playlist and pending/playing requests.
+Randomly picks TRACK-C = “Don't get me down” (example cached replacement).
+Updates failed_downloads.replacement_id = TRACK-C.
+Updates the SAME jobs row:
+  {id: "boost:PLAY-A", done: 0,
+   body: {kind: "boost", tracks: [TRACK-B, TRACK-C],
+          failed: [TRACK-B], completed: []}}
+        ↓
+SAME CONSUMER immediately downloads/reuses TRACK-C in its current work loop.
+No new boost ID and no replacement SQS download message are needed.
+On success: completed:[TRACK-C], done:1 → playlist → genre fulfillment → ack.
+        ↓
+Separately, DISPATCHER sends the failure outbox body with
+id:"failed-download:FAILURE-1" to SQS radio-live-download-failures.
+It marks that archive outbox record sent/done after successful delivery.
+Admin reads SQLite failed_downloads to show URLs, errors and replacement details.
+```
+
+The failure archive queue has 14-day retention and no download consumer. It is
+separate from each work queue's `-dead` redrive queue. Replacements are bounded to
+three per job. Exact-track requests preserve identity; only genre requests can
+substitute a different song. If attempted downloads fail and no replacement
+completes, the sample final state is:
+
+```text
+jobs:   {id:"boost:PLAY-A", done:1,
+         body:{kind:"boost", tracks:[TRACK-B], failed:[TRACK-B], completed:[]}}
+outbox: {id:"boost:PLAY-A", done:T_DONE,
+         failed:"Download failed; no eligible replacement completed", ...}
+SQS:    original download message acknowledged/deleted
+Redis:  unfulfilled genre score retained; SQLite reactions also retained
+```
+
+That terminal job does not automatically wait for a same-genre crawl or revive
+when new tracks arrive; that proposed behavior remains deferred. An initially
+empty selection can also finish with `completed:[]` without the failure text
+above, because no download was attempted.
+
+Before the replacement fix, a download exception escaped the consumer, leaving
+its SQS message undeleted. After the visibility timeout expired, SQS made that
+same message available again; the worker reloaded the same `jobs.body.tracks`
+and attempted the same failing song. Normal source failures now follow the
+replacement branch. Unhandled/infrastructure errors can still leave work
+unacknowledged: download visibility is 900 seconds (renewed while processing),
+reaction visibility is 60 seconds, and redrive is configured after five receives.
+The dispatcher independently resends unfinished outbox work after 20 minutes;
+completed outbox IDs are skipped/acknowledged on duplicate delivery.
+
+The `downloads` container runs separate consumers for `downloads` (refills),
+`priority-downloads` (boosts/recovery), and `request-downloads` (listener requests).
+Each handles one message at a time. An invisible failed message does not prevent
+other available messages from being received, although a running download occupies
+its own consumer until that attempt finishes.
+
+### Mood in chat → confirmation → selected track → request queue
+
+This example assumes AI chat is configured and the model offers **genres only**.
+It illustrates a valid conversation; wording and retrieved results can vary.
+
+```text
+Browser → POST /api/requests (listener session cookie)
+  {request_id: REQUEST-1, mode:"auto", query:"I'm stressed; help me unwind"}
+        ↓
+API container — requests.submit() → rag.submit()
+Reads local SQLite tracks (catalog metadata, source/rights and availability).
+Reads this listener's last 8 requests and rag_pending confirmation state.
+Records rag_turns: {id:REQUEST-1, listener:LISTENER-A, created:T1, busy:1}.
+        ↓
+RAG retrieval — rag.retrieve()
+Builds documents from title, artists, album, genre and genre-associated mood words.
+Uses cached SQLite rag_embeddings:
+  {track_id:TRACK-D, model:"text-embedding-3-small:256",
+   digest:"<document hash>", vector:[<256 numbers>]}
+Embeds missing/changed documents in bounded batches and embeds the query.
+Ranks by semantic similarity + exact identity matches + word overlap.
+Passes up to 12 retrieved tracks, available genres, history, pending choices
+and station context to the OpenAI Responses API.
+This searches the LOCAL catalog; it is not a live search across music hosts.
+        ↓
+Example structured AI decision:
+  {action:"clarify", intent:"mood", track_id:null, source_ids:[],
+   genres:["ambient","jazz"],
+   reply:"Would ambient or jazz suit your mood?"}
+Server validates catalog IDs/genres; a mood suggestion does not authorize a fetch.
+SQLite requests:
+  {sequence:100, id:REQUEST-1, listener:LISTENER-A,
+   query:"I'm stressed; help me unwind", track_id:null,
+   status:"awaiting_confirmation", suggestions:["ambient","jazz"],
+   response:"Would ambient or jazz suit your mood?", engine:"rag", ...}
+SQLite rag_pending:
+  {listener:LISTENER-A, genres:["ambient","jazz"], track_ids:[]}
+No download outbox row or SQS message yet. rag_turns.busy returns to 0.
+        ↓
+Listener replies → POST /api/requests
+  {request_id:REQUEST-2, mode:"auto", query:"ambient"}
+        ↓
+API / RAG reads saved conversation and pending choices again.
+Resolves the known genre; calls requests.choose_genre_track(c,"ambient").
+Candidate SQL:
+  SELECT * FROM tracks
+  WHERE status IN ('ready','available')
+    AND id NOT IN (SELECT track_id FROM requests WHERE status='pending');
+Python filters genre, source/rights/cap and scheduling eligibility, excludes
+currently airing tracks, then prefers never-played/never-requested tracks.
+Otherwise chooses least recently played/requested; ties randomize artist group
+then track. It does not simply pick the first ambient SQL row.
+Example selected metadata: TRACK-D, title:"Quiet Evening", genre:"ambient".
+        ↓
+API commits SQLite request + outbox together:
+  requests:
+    {sequence:101, id:REQUEST-2, listener:LISTENER-A, query:"ambient",
+     mode:"auto", track_id:TRACK-D, requested_genre:"ambient",
+     status:"pending", engine:"rag", play_id:null, created:T2,
+     response:"Queued … ahead of automatic selections when eligible.", ...}
+  outbox:
+    {id:"request:REQUEST-2", queue:"request-downloads",
+     body:{kind:"request", track_id:TRACK-D, request_id:REQUEST-2},
+     created:T2, sent:null, done:null, failed:null}
+Clears rag_pending and removes TRACK-D from automatic playlist if present.
+        ↓
+DISPATCHER WORKER — dispatcher container
+SQS radio-live-request-downloads:
+  {id:"request:REQUEST-2", kind:"request",
+   track_id:TRACK-D, request_id:REQUEST-2}
+        ↓
+REQUEST-DOWNLOAD CONSUMER — downloads container
+The API already chose the track; the consumer saves that choice in SQLite jobs:
+  {id:"request:REQUEST-2", done:0,
+   body:{kind:"request", tracks:[TRACK-D], completed:[]}}
+Downloads TRACK-D or reuses ready audio; updates completed:[TRACK-D], done:1.
+Fulfills its genre score, marks outbox.done and acknowledges the SQS delivery.
+The request remains in requests, not an automatic playlist insertion.
+For a genre request, a failed download can use the replacement branch above,
+updating requests.track_id while preserving sequence:101.
+        ↓
+STATION WORKER — station container
+Reads pending requests in application FIFO order (requests.sequence).
+Downloading/policy-blocked requests are deferred so eligible music can play.
+When TRACK-D is eligible and selected:
+  plays:    {id:PLAY-D, track_id:TRACK-D, starts:T3, ends:T4, actual_end:null, ...}
+  requests: {id:REQUEST-2, status:"playing", play_id:PLAY-D, ...}
+At completion, request status becomes "played".
+This exact play_id supplies the request's Played/Finished display timestamps.
+```
+
+If only one genre is pending, “yes” can confirm it. If several genres are pending,
+the conversation must resolve which one. When the host offers a **specific track**,
+its ID is saved in `rag_pending.track_ids`; confirming that one track preserves
+its identity rather than running the genre variety selector. Multiple offered
+tracks require a choice. Specific title, artist or album requests can select a
+matching local catalog track directly; unavailable selections produce a not-found
+response instead of an invented download. If no eligible variety candidate exists,
+the initial catalog selection can remain pending for later scheduling; acceptance
+is not a promise of immediate playback. With AI unavailable, the basic chat fallback
+uses its local mood/genre rules and `conversations` state instead of this RAG flow.
+
+### How browsers learn what happened
+
+Both flows feed the same public view: `GET /api/status` supplies the initial
+snapshot, and `GET /api/events` supplies SSE updates and periodic status snapshots.
+Redis reaction events animate the community pulse. SQLite-backed views supply
+request/download status, selected titles and broadcast times. `GET /api/requests`
+supplies the current listener's private chat history; public request activity is
+shared with other listeners through the station views.
+
+The latest reaction follow-up is built from the latest boost `outbox` row joined
+to `jobs`, selected `tracks`, and broadcast history. “Retry pending” was derived
+from saved job/track state, not an SQS query or the reaction POST response. The
+latest follow-up can remain visible after playback until another boost replaces
+it, which is why source and follow-up broadcast timestamps are shown separately.

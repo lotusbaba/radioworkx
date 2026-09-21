@@ -21,9 +21,11 @@ with sync_playwright() as p:
         admin.wait_for_function('document.querySelectorAll("#metrics .card").length===4')
         if '--token-check' in sys.argv:
             admin.locator('#token-name').fill('Browser verification (revoked after check)')
-            with admin.expect_response(lambda r:r.url.endswith('/api/admin/tokens') and r.request.method=='POST') as created:
+            with admin.expect_response(
+                lambda response: response.url.endswith('/api/admin/tokens') and response.request.method=='POST'
+            ) as token_response_info:
                 admin.locator('#token-create').click()
-            issued=created.value.json()
+            issued=token_response_info.value.json()
             try:
                 admin.locator('#token-reveal').wait_for(state='visible')
                 assert admin.locator('#token-value').input_value()==issued['token']
@@ -55,20 +57,26 @@ with sync_playwright() as p:
             admin.get_by_role('button',name='Playbacks ↓',exact=True).wait_for()
             values=list(map(int,counts()))
             assert values==sorted(values,reverse=True)
-            with admin.expect_response(lambda r:'/repository/tracks?' in r.url and 'direction=asc' in r.url):
+            with admin.expect_response(
+                lambda response:'/repository/tracks?' in response.url and 'direction=asc' in response.url
+            ):
                 admin.get_by_role('button',name='Playbacks ↓',exact=True).click()
             admin.get_by_role('button',name='Playbacks ↑',exact=True).wait_for()
             values=list(map(int,counts()))
             assert values==sorted(values)
             admin.locator('#min-plays').fill('2')
-            with admin.expect_response(lambda r:'/repository/tracks?' in r.url and 'max_plays=10' in r.url) as filtered:
+            with admin.expect_response(
+                lambda response:'/repository/tracks?' in response.url and 'max_plays=10' in response.url
+            ) as filtered_response_info:
                 admin.locator('#max-plays').fill('10')
-            expected=filtered.value.json()
+            expected=filtered_response_info.value.json()
             admin.wait_for_function('(n)=>document.querySelector("#pagination").textContent.includes(n.toLocaleString()+" records")',arg=expected['total'])
             assert all(2<=int(value)<=10 for value in counts())
             admin.locator('#min-plays').fill('11')
             admin.wait_for_function('document.querySelector("#error").textContent.includes("Minimum playbacks")')
-            with admin.expect_response(lambda r:'/repository/tracks?' in r.url and 'min_plays' not in r.url):
+            with admin.expect_response(
+                lambda response:'/repository/tracks?' in response.url and 'min_plays' not in response.url
+            ):
                 admin.locator('#clear-plays').click()
             admin.wait_for_function('!document.querySelector("#error").textContent')
             print(json.dumps({'playback_filters_verified':True,'sorting_verified':True,'matching_tracks':expected['total']}))
@@ -141,9 +149,12 @@ with sync_playwright() as p:
     if '--ai-check' in sys.argv:
         assert 'AI music chat' in page.locator('#chat-engine').inner_text()
         page.locator('#request-query').fill('I am winding down after a long day. Can you help me choose a mood?')
-        with page.expect_response(lambda r:r.url.endswith('/api/requests') and r.request.method=='POST',timeout=60000) as ai_reply:
+        with page.expect_response(
+            lambda response: response.url.endswith('/api/requests') and response.request.method=='POST',
+            timeout=60000,
+        ) as ai_response_info:
             page.locator('#request-send').click()
-        result=ai_reply.value.json()
+        result=ai_response_info.value.json()
         assert result['engine']=='rag' and result['status']=='awaiting_confirmation'
         assert result['track_id'] is None
         page.get_by_text('Catalog-grounded AI',exact=True).wait_for()
@@ -151,17 +162,22 @@ with sync_playwright() as p:
     if '--chat-check' in sys.argv:
         before=page.request.get(url+'/api/status').json()['request_queue']
         page.locator('#request-query').fill('get me a reggae track')
-        with page.expect_response(lambda r:r.url.endswith('/api/requests') and r.request.method=='POST') as reply:
+        with page.expect_response(
+            lambda response: response.url.endswith('/api/requests') and response.request.method=='POST'
+        ) as request_response_info:
             page.locator('#request-send').click()
-        assert reply.value.json()['status']=='awaiting_confirmation'
-        assert "don't have playable reggae" in reply.value.json()['response']
+        request_response=request_response_info.value.json()
+        assert request_response['status']=='awaiting_confirmation'
+        assert "don't have playable reggae" in request_response['response']
         page.locator('.chat-choices button').first.wait_for()
         assert page.request.get(url+'/api/status').json()['request_queue']==before
         page.wait_for_function('!document.querySelector("#request-send").disabled')
         page.locator('#request-query').fill('no thanks')
-        with page.expect_response(lambda r:r.url.endswith('/api/requests') and r.request.method=='POST') as cancelled:
+        with page.expect_response(
+            lambda response: response.url.endswith('/api/requests') and response.request.method=='POST'
+        ) as cancellation_response_info:
             page.locator('#request-send').click()
-        assert cancelled.value.json()['status']=='cancelled'
+        assert cancellation_response_info.value.json()['status']=='cancelled'
         page.wait_for_function('!document.querySelector("#request-send").disabled')
     if url.startswith('https://'):
         assert page.evaluate('window.isSecureContext && typeof crypto.randomUUID === "function"')
@@ -237,9 +253,11 @@ with sync_playwright() as p:
     choices=[x['metadata'] for x in snapshot['playlist'] if x['metadata']['id']!=snapshot.get('play',{}).get('track_id')][:2]
     for choice in choices:
         page.locator('#request-query').fill(choice['title'])
-        with page.expect_response(lambda r:r.url.endswith('/api/requests') and r.request.method=='POST') as sent:
+        with page.expect_response(
+            lambda response: response.url.endswith('/api/requests') and response.request.method=='POST'
+        ) as request_response_info:
             page.locator('#request-send').click()
-        assert sent.value.json()['track_id']==choice['id']
+        assert request_response_info.value.json()['track_id']==choice['id']
         page.wait_for_function('!document.querySelector("#request-send").disabled')
     queue=page.request.get(url+'/api/status').json()['request_queue']
     assert [q['metadata']['id'] for q in queue][-2:]==[c['id'] for c in choices]
@@ -251,16 +269,22 @@ with sync_playwright() as p:
         page.get_by_text('You’re on the live frequency.',exact=True).wait_for(timeout=20000)
         page.wait_for_function('document.querySelector("audio").currentTime > 1',timeout=20000)
         fire=page.get_by_role('button',name='Fire:',exact=False)
-        with page.expect_response(lambda r:r.url.endswith('/api/reactions') and r.request.method=='POST') as first:
+        with page.expect_response(
+            lambda response: response.url.endswith('/api/reactions') and response.request.method=='POST'
+        ) as first_reaction_response_info:
             fire.click()
-        first_body=first.value.json()
-        assert first.value.status==202
+        first_reaction_response=first_reaction_response_info.value
+        first_body=first_reaction_response.json()
+        assert first_reaction_response.status==202
         page.wait_for_function('document.querySelectorAll("#emojis button:disabled").length === 6')
         page.wait_for_function('document.querySelectorAll("#emojis button:disabled").length === 0',timeout=3000)
-        with page.expect_response(lambda r:r.url.endswith('/api/reactions') and r.request.method=='POST') as second:
+        with page.expect_response(
+            lambda response: response.url.endswith('/api/reactions') and response.request.method=='POST'
+        ) as second_reaction_response_info:
             fire.click()
-        second_body=second.value.json()
-        assert second.value.status==202
+        second_reaction_response=second_reaction_response_info.value
+        second_body=second_reaction_response.json()
+        assert second_reaction_response.status==202
         assert second_body['event_id']!=first_body['event_id']
         assert 1 <= second_body['server_time']-first_body['server_time'] < 3
 
@@ -270,16 +294,20 @@ with sync_playwright() as p:
         page.get_by_role('button',name='Tune out').click()
     before=page.request.get(url+'/api/status').json()['request_queue']
     page.locator('#request-query').fill('I want something matching my mood right now')
-    with page.expect_response(lambda r:r.url.endswith('/api/requests') and r.request.method=='POST') as suggested:
+    with page.expect_response(
+        lambda response: response.url.endswith('/api/requests') and response.request.method=='POST'
+    ) as suggestion_response_info:
         page.locator('#request-send').click()
-    assert suggested.value.json()['status']=='awaiting_confirmation'
+    assert suggestion_response_info.value.json()['status']=='awaiting_confirmation'
     assert page.request.get(url+'/api/status').json()['request_queue']==before
     page.reload(wait_until='domcontentloaded')
     page.locator('.chat-choices button').first.wait_for()
     choice=page.locator('.chat-choices button').first.inner_text()
-    with page.expect_response(lambda r:r.url.endswith('/api/requests') and r.request.method=='POST') as confirmed:
+    with page.expect_response(
+        lambda response: response.url.endswith('/api/requests') and response.request.method=='POST'
+    ) as confirmation_response_info:
         page.locator('.chat-choices button').first.click()
-    assert confirmed.value.json()['status']=='pending'
+    assert confirmation_response_info.value.json()['status']=='pending'
     page.wait_for_function('!document.querySelector("#request-send").disabled')
     assert page.request.get(url+'/api/status').json()['request_queue'][-1]['metadata']['genre']==choice
     page.set_viewport_size({'width':390,'height':844})

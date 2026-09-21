@@ -13,7 +13,10 @@ with sync_playwright() as p:
     context=browser.new_context(viewport={'width':1440,'height':1050})
     page=context.new_page();errors=[];responses=[]
     page.on('pageerror',lambda e:errors.append(str(e)))
-    page.on('response',lambda r:responses.append(r.status) if '/api/activity' in r.url else None)
+    page.on(
+        'response',
+        lambda response: responses.append(response.status) if '/api/activity' in response.url else None,
+    )
     page.goto(BASE+'/artists',wait_until='networkidle')
     page.locator('#search').fill('telemetry-private-search-no-match')
     page.locator('#search-form button').click()
@@ -37,7 +40,9 @@ with sync_playwright() as p:
     with httpx.Client(timeout=15) as client:
         query={'size':100,'query':{'term':{'session.id':session}}}
         for _ in range(30):
-            r=client.post(ES+'/radioworkx-events-*/_search',json=query);r.raise_for_status();docs=[h['_source'] for h in r.json()['hits']['hits']]
+            search_response=client.post(ES+'/radioworkx-events-*/_search',json=query)
+            search_response.raise_for_status()
+            docs=[hit['_source'] for hit in search_response.json()['hits']['hits']]
             actions={d['event']['action'] for d in docs}
             if {'search.results','playback.started','playback.heartbeat','playback.seek','playback.paused'}<=actions:break
             time.sleep(2)

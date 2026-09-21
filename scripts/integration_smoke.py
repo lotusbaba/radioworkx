@@ -22,8 +22,8 @@ with httpx.Client(base_url=base,timeout=10) as c:
     for i in range(21):
         with httpx.Client(base_url=base,timeout=10) as listener:
             listener.get('/')
-            result=listener.post('/api/reactions',json={'play_id':play['id'],'emoji':'🔥'})
-            assert result.status_code==202,result.text
+            reaction_response=listener.post('/api/reactions',json={'play_id':play['id'],'emoji':'🔥'})
+            assert reaction_response.status_code==202,reaction_response.text
     deadline=time.monotonic()+20
     while time.monotonic()<deadline:
         with db.connect() as sql:

@@ -91,6 +91,7 @@ These endpoints are bound to loopback and are not public station URLs.
 ## Documentation
 
 - [System design and operations](docs/SYSTEM_DESIGN.md) — full behavioral specification, architecture, APIs, deployment procedures, and observability setup.
+- [RAG chat architecture](docs/RAG_CHAT_ARCHITECTURE.md) — embeddings, hybrid retrieval, pending confirmations, structured output, validation, rate limits, and fallback behavior.
 - [Telemetry architecture explained](docs/telemetry-architecture-explained.md) — component-by-component explanation of the telemetry pipeline.
 - [Architecture sequence source](docs/current-architecture.sequence.txt) and [rendered SVG](docs/current-architecture.svg) — editable SequenceDiagram.org model and generated diagram.
 - [Session handoff](docs/SESSION_HANDOFF.md) — current operational context, recent production fixes, and live verification notes.

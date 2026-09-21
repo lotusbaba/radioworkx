@@ -3,7 +3,7 @@ import hashlib
 import secrets
 import time
 import uuid
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from app import db
 
@@ -22,11 +22,12 @@ def issue(name):
     return {'id':token_id,'name':name,'token':token,'created':now}
 
 
-def authenticate(credentials: HTTPAuthorizationCredentials|None=Depends(bearer)):
+def authenticate(request: Request, credentials: HTTPAuthorizationCredentials|None=Depends(bearer)):
     if credentials is None or credentials.scheme.lower()!='bearer':
         raise HTTPException(401,'App bearer token required.',headers={'WWW-Authenticate':'Bearer'})
     with db.transaction() as c:
         row=c.execute('SELECT id FROM app_tokens WHERE digest=? AND revoked IS NULL',(digest(credentials.credentials),)).fetchone()
         if not row:raise HTTPException(401,'Invalid or revoked app token.',headers={'WWW-Authenticate':'Bearer'})
         c.execute('UPDATE app_tokens SET last_used=? WHERE id=?',(time.time(),row['id']))
+    request.scope['app_identity']='app:'+row['id']
     return 'app:'+row['id']

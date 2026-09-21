@@ -522,3 +522,189 @@ including an idle stream closed at its drain deadline. AWS parity validation rem
 outstanding and limitations are explicit in the PR. No production LocalStack upgrade
 was performed. Same-image radio rollouts now preserve the previous distinct release
 instead of replacing the rollback image with the same image.
+
+## Admin track playback counts (2026-09-18)
+
+Tracks now includes all-time `play_count`, derived from existing broadcast history:
+starts <= now, actual_end absent or after starts, excluding the active introduction's
+play ID. Includes active music and broadcasts interrupted after starting; excludes
+future/intro-only reservations. This counts station broadcasts, not listener sessions.
+No schema changes or history rewrite. Tracks UI defaults to playback count descending,
+with clickable column sorts and inclusive minimum/maximum inputs (blank = unbounded,
+0 = never played). Filtering/sorting happen before pagination; chart dates do not
+limit these counts. API accepts min_plays, max_plays, sort, direction; sort columns
+are allowlisted. Regression suite: 129 passed. Focused browser check available via
+`scripts/browser_smoke.py --admin-check --playback-check --url http://127.0.0.1:8001`.
+Deployed through scripts/deploy.py to the API slot. Read-only browser verification
+passed for ascending/descending counts, inclusive 2–10 filtering (394 matches at
+verification time), invalid ranges, clearing filters, pagination and mobile layout.
+Station workers and playback volumes were preserved.
+
+## Refill variety and Archive storage-host fix (2026-09-18)
+
+Diagnosis: 694 ready tracks had all played; 2,284 unattempted catalog tracks and
+563 failed Archive tracks had zero broadcasts. 560 failures were Unsupported
+provider host; three were timeouts. Fresh candidates covered nine genres, so the
+old fresh-only ten-genre sampler failed and its mixed fallback favored sparse
+artist/genre groups. The only ready orchestral track had 157 broadcasts and appeared
+in 153 refill plans. These are historical observations, not live counters.
+
+Added policy.balanced_sample for refill planning: bounded search prioritizes the
+largest feasible fresh subset, orders genres by oldest last broadcast (random ties),
+and ranks repeat recordings by fewest broadcasts then oldest last broadcast. Keeps
+ten distinct genres and disjoint artists; uses a feasible fallback if optimization
+exhausts its budget. Search remains outside SQLite writer transactions. Existing
+saved jobs, listener priority, station policy checks, cap and playback history remain
+intact. Only downloads worker was rebuilt/recreated; station/audio was not restarted.
+Live dry-run selected nine new songs plus one cached song in ten genres in 4ms.
+
+Three previously failing Archive URLs redirected from archive.org to numbered
+`dnNNNNNN.ca.archive.org` hosts and returned HTTP 200. Added only that exact hostname
+pattern to the Archive validator; HTTPS, credentials, port and every-hop checks
+remain. Host spoofing tests reject lookalikes and other subdomains. Full suite passed
+132 tests; an additional refill integration test then passed with the focused suite
+(39 tests), covering nine new tracks, least-played repeat and durable plan reuse.
+Full acquisition validation succeeded for archived failure
+`ia-275552a5c4c2032b7cd770ae56fec1a0`: license/identity recheck, validated redirects,
+4,189,247-byte normalized MP3, 261.8 seconds. Temporary verification audio removed.
+Reset exactly 560 failed Archive tracks whose latest archived error was Unsupported
+provider host to available/error NULL for gradual normal acquisition. Failure archive,
+old jobs and requests preserved; three timeout failures remain quarantined. These
+560 are retry candidates, not a claim that all have successfully downloaded. Existing
+queued tracks finish normally before new refill selection takes effect.
+
+## Artist/album pages and personal playback (2026-09-18)
+
+User explicitly requested a page for every artist/album with playable tracks. This
+supersedes the original live-only/no-on-demand requirement. New public `/artists`
+and `/albums` directories support search and pagination; hash-ID detail pages list
+tracks and related artists/albums. Featured artists each get their own page; album
+identity uses album_id, not title. The station's now-playing names link to detail
+pages. No biographies or artwork provenance are invented.
+
+`app/library.py` adds public browse APIs under `/api/library`, plus listener-cookie
+protected POST `/api/listen/{id}` preparation and GET `/api/listen/{id}/audio`.
+GET `/api/listen/{id}` exposes readiness. MP3 FileResponse supports Range seeking;
+paths must resolve beneath DATA/audio. Public payloads exclude filesystem paths,
+source download URLs, raw errors and private rights notes. Existing bearer-token
+integration APIs remain protected. Source/license attribution is displayed.
+
+Personal preparation emits a deduplicated `listen:{track_id}` job on request-downloads.
+Workers acquire exact identity without station playlist insertion, listener requests,
+reaction fulfillment or broadcast-history writes. Existing download validation and
+10,000-track cap remain. New personal_downloads table limits new preparations to ten
+per minute per cookie identity; old entries are pruned. Acquisition already owned by
+another consumer now raises TrackReserved for retry instead of quarantining audio.
+Unavailable/missing-source tracks remain listed with disabled controls; preparation
+failures are reported without leaking private error details. Native personal audio
+supports pause/seek/volume; page navigation ends that listening session.
+
+138 tests passed. Browser smoke script `scripts/library_smoke.py <url>` verifies
+artist/album navigation, real cached MP3 playback, seeking, stop and mobile layout.
+Add `--prepare` to acquire one previously available recording; this changes the
+library but does not queue a station request. Downloads worker deployed first; API
+uses scripts/deploy.py rollout. Station/audio worker was not restarted.
+Live browser verification also passed first-play preparation of an undownloaded
+recording, followed by actual MP3 playback and seeking; no JavaScript errors.
+Public HTTPS APIs reported 406 artists and 388 albums at verification time.
+Final HTTPS browser check passed navigation, cached playback, seeking and station
+mobile directory links with no JS errors. API final image begins `8f3cf0f3dba0`;
+downloads worker image begins `e4aba2b6a4e1` (same backend feature code; API has the
+additional mobile navigation CSS). Personal playback counts are intentionally not
+included in the admin's station-broadcast totals.
+
+## User activity and ELK (2026-09-19)
+
+User requested all proposed activity categories. Deployed browser browsing/search,
+live and personal playback lifecycle/heartbeat events, API and admin audit,
+reactions, requests, downloads, job outcomes/retries, configuration observations,
+and sanitized errors. Broadcast counts, personal playback starts and listening
+duration remain separate. Collection begins at installation; historical listener
+activity cannot be reconstructed.
+
+`app/telemetry.py` buffers allowlisted ECS JSON events asynchronously into rotating
+files on telemetry-data. `app/telemetry_api.py` validates cookie-bound browser batches
+and instruments API mutations/latency. `app/telemetry_collector.py` runs as the
+telemetry-observer service and observes durable database outcomes without restarting
+the live station. Browser instrumentation lives in `app/static/activity.js`.
+`app/activity_admin.py` and `app/static/admin-activity.js` provide the authenticated
+admin activity timeline with action, track, user, session and time filters.
+
+Elasticsearch, Logstash and Kibana use official 9.5.4 images. Logstash tails the
+shared files into daily indices with stable event IDs and a persistent queue.
+Elasticsearch localhost:9200 and Kibana localhost:5601 are bound to loopback only;
+they are not public Funnel endpoints. Preserve elastic-data, logstash-data and
+telemetry-data alongside existing application volumes. `scripts/setup_elk.py`
+installs the 30-day retention policy, index template and four dashboards:
+rwx-audience, rwx-music, rwx-requests, rwx-errors. Saved objects are also recorded in
+`infra/elk/dashboards.ndjson`. See README for startup commands and data limitations.
+
+No raw search/chat text, credentials, cookies, IPs, signed URLs or exception messages
+are captured. Listener identifiers are HMAC pseudonyms; browser/device labels are
+coarse. Heartbeats measure engaged wall time rather than seek position. Counts are
+estimates from client reports; background throttling can undercount. Bounded buffers
+can drop telemetry during prolonged outages, without blocking audio. Producer files
+rotate at 20 MiB with four backups; observer removes files older than seven days.
+
+Verification: full suite 144 passed, JS syntax and git whitespace checks passed.
+Real browser playback/search/seek/pause events reached Elasticsearch and the admin
+timeline; a roughly 32-second test recorded 31.7 seconds despite seeking forward.
+All four Kibana dashboards rendered and were screenshot-checked. The initial combined
+smoke test hit Kibana's CSP restriction on Playwright eval; changed it to locator
+waiting and verified dashboards independently with `scripts/kibana_smoke.py`.
+Downloads/dispatcher/reactions/crawler/visuals and the observer were deployed; the
+station was not restarted. Final rolling API deployment completed successfully,
+switching api-next to api and draining existing streams. These runtime observations
+are historical: inspect current health before diagnosing future incidents.
+
+## OpenSearch alongside ELK (2026-09-20)
+
+User requested OpenSearch with the OVHcloud example's layout: event-action area
+chart, category/action donut, and full-width searchable audit table. Added independent
+OpenSearch/Dashboards 3.8.0 services on loopback ports 9201/5602, plus opensearch-ingest.
+The ingestion image uses Logstash 9.5.4 and OpenSearch output plugin 2.1.1. Plugin
+installation needs a 2 GiB build heap; the first smaller-heap build failed, was stopped,
+and was successfully rebuilt. Runtime ingestion heap remains 256 MiB with 768 MiB cap.
+
+The pipeline tails the existing sanitized telemetry files with independent offsets,
+persistent queue and deterministic event IDs. It adds radioworkx.category from the
+first action component. No application playback or event emission changes were needed.
+OpenSearch uses opensearch-data; ingestion offsets/queue use opensearch-ingest-data.
+Do not remove volumes. Existing ELK remains independent, including the admin timeline.
+Admin now links to http://localhost:5602/app/dashboards#/view/rwx-activity-overview;
+its rolling API deployment completed without restarting the station.
+
+scripts/setup_opensearch.py installs 30-day ISM retention, mappings, the index pattern,
+two native visualizations, saved search and dashboard. Both current event indices were
+verified to have the active retention policy. Dashboard uses a 24-hour window and
+30-second refresh. Existing retained telemetry files are read on first startup;
+there is no historical Elasticsearch backfill. Saved objects are checked in under
+infra/opensearch/dashboards.ndjson. See README for startup/setup commands.
+
+Initial browser failure "Cannot read properties of null (reading 'version')" came
+from missing panel.version in imported dashboard panels. Fixed panel versions to
+3.8.0. Also populated index-pattern fields (with known-field defaults before first
+ingestion and live field discovery on later setup) to prevent missing-field chart
+errors and enable time sorting. Setup overwrites dashboard customizations but leaves
+an existing retention policy intact. Three setup regression tests cover references,
+panel versions/fields, retention and repeat setup; full suite passed 147 before the
+browser corrections and focused setup tests passed after them.
+
+Final browser smoke passed: a new browser page view reached both OpenSearch and
+Elasticsearch under the same event ID. Both charts and the audit table rendered
+with real events, and the table showed newest events first. Screenshot saved at
+/tmp/rwx-opensearch-check/overview.png. Radio health remained OK.
+
+## Local and public access recovery (2026-09-20)
+
+Both app endpoints became unreachable because the Docker daemon was not running.
+Tailscale was connected and the RadioWorkx Funnel route still correctly targeted
+127.0.0.1:8001. Starting Docker Desktop with `open -a Docker` restored the existing
+containers through their restart policies, including active API slot api-next and
+Nginx. Local and public /health both returned HTTP 200 afterward. No rebuild, volume
+reset, deployment switch or Tailscale route change was needed. The reason Docker
+stopped was not established. Use http://localhost:8001 for this managed deployment;
+port 8000 may be unavailable because the api slot is intentionally stopped.
+Public page and live MP3 subsequently returned HTTP 200, with audio bytes received.
+Station status reported On air. The first status request timed out during startup;
+a later request succeeded in 9.4 seconds while services were warming up.

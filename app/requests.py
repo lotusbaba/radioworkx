@@ -243,6 +243,9 @@ def submit_local(query, mode, listener, request_id):
         c.execute('INSERT INTO requests(id,listener,query,mode,response,track_id,status,created) VALUES(?,?,?,?,?,?,?,?)',
                   (request_id,listener,query,mode,response,track_id,status,time.time()))
         if track_id:
+            if turn:
+                from app import telemetry
+                telemetry.emit('request.confirmed',who=listener,request_id=request_id,track_id=track_id)
             if search_mode == 'genre':
                 c.execute('UPDATE requests SET requested_genre=? WHERE id=?',(meta['genre'],request_id))
             c.execute('DELETE FROM playlist WHERE track_id=?', (track_id,))

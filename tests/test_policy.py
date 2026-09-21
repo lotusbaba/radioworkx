@@ -61,3 +61,27 @@ def test_many_equivalent_tracks_with_impossible_diversity(metadata):
     pool=[{**metadata,'id':f'{g}-{a}-{n}','genre':f'genre-{g}','artists':[f'artist-{a}']} for g in range(10) for a in range(9) for n in range(20)]
     assert diverse_sample(pool)==[]
     assert diverse_sample(pool,max_states=1)==[]
+
+
+def test_balanced_refill_maximizes_fresh_and_rotates_genres(metadata):
+    from app.policy import balanced_sample
+    pool=[dict(metadata,id=f'new-{i}',genre=str(i),artists=[str(i)]) for i in range(9)]
+    pool += [dict(metadata,id=f'old-{i}',genre=str(i),artists=[str(i)]) for i in range(14)]
+    fresh={t['id'] for t in pool if t['id'].startswith('new')}
+    for seed in range(5):
+        result=balanced_sample(pool,fresh,{}, {},{'9':100,'10':90,'11':80,'12':70,'13':60},rng=random.Random(seed))
+        assert len(result)==10
+        assert len({t['genre'] for t in result})==10
+        assert sum(t['id'] in fresh for t in result)==9
+        assert 'old-13' in {t['id'] for t in result}
+
+
+def test_balanced_refill_repeat_counts_and_artist_conflicts(metadata):
+    from app.policy import balanced_sample
+    pool=[dict(metadata,id='fresh',genre='a',artists=['shared']),
+          dict(metadata,id='repeat',genre='a',artists=['other']),
+          dict(metadata,id='only-b',genre='b',artists=['shared'])]
+    result=balanced_sample(pool,{'fresh'}, {},{},{},size=2)
+    assert {t['id'] for t in result}=={'repeat','only-b'}
+    pool=[dict(metadata,id=str(i),genre='a',artists=['artist']) for i in range(3)]
+    assert balanced_sample(pool,set(),{'0':80,'1':2,'2':2},{'1':50,'2':20},{},size=1)[0]['id']=='2'

@@ -213,6 +213,9 @@ def submit(query, mode, listener, request_id):
             if status == 'awaiting_confirmation':
                 c.execute('INSERT INTO rag_pending VALUES(?,?,?)',(listener,json.dumps(suggestions),json.dumps([t['id'] for t in cited] or ([track['id']] if track else []))))
             sources = [{k:t.get(k) for k in ('id','title','bandcamp_url')} for t in cited]
+            if track_id and decision['intent']=='confirmation':
+                from app import telemetry
+                telemetry.emit('request.confirmed',who=listener,request_id=request_id,track_id=track_id)
             c.execute('INSERT INTO requests(id,listener,query,mode,response,track_id,status,created,suggestions,sources,engine) VALUES(?,?,?,?,?,?,?,?,?,?,?)',
                       (request_id,listener,query,mode,reply,track_id,status,time.time(),json.dumps(suggestions),json.dumps(sources),'rag'))
             if track_id:

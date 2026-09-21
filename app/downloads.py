@@ -9,7 +9,7 @@ from urllib.parse import urlparse
 import httpx
 from app import db
 from app.config import DATA, DEMO, MAX_TRACKS
-from app.policy import diverse_sample, eligible, WINDOW
+from app.policy import diverse_sample, balanced_sample, eligible, WINDOW
 
 log = logging.getLogger(__name__)
 
@@ -73,8 +73,8 @@ def plan_job(event):
         row = c.execute('SELECT body,done FROM jobs WHERE id=?',(event['id'],)).fetchone()
         if row:
             return json.loads(row['body']), bool(row['done'])
-        if event['kind'] == 'request':
-            plan = {'tracks':[event['track_id']],'kind':'request','completed':[]}
+        if event['kind'] in {'request','listen'}:
+            plan = {'tracks':[event['track_id']],'kind':event['kind'],'completed':[]}
             c.execute('INSERT INTO jobs(id,body) VALUES(?,?)',(event['id'],json.dumps(plan)))
             return plan, False
         capped = library_only(c)
@@ -121,6 +121,10 @@ def plan_job(event):
         return plan, False
 
 
+class TrackReserved(RuntimeError):
+    pass
+
+
 def reserve(track_id):
     with db.transaction() as c:
         row = c.execute('SELECT * FROM tracks WHERE id=?',(track_id,)).fetchone()
@@ -134,7 +138,7 @@ def reserve(track_id):
         if used >= MAX_TRACKS:
             return None
         if row['status'] == 'downloading':
-            raise RuntimeError('Track already reserved')
+            raise TrackReserved('Track already reserved')
         c.execute("UPDATE tracks SET status='downloading',error=NULL WHERE id=?",(track_id,))
         return dict(row)
 
@@ -212,6 +216,9 @@ def acquire(track_id):
     row = reserve(track_id)
     if row is None or row['status'] == 'ready':
         return row is not None
+    from app import telemetry
+    download_started=time.monotonic()
+    telemetry.emit('download.started',track_id=track_id)
     audio_dir = DATA / 'audio'
     audio_dir.mkdir(parents=True,exist_ok=True)
     partial = audio_dir / f'{track_id}.part.mp3'
@@ -229,6 +236,7 @@ def acquire(track_id):
             from app.hosts import completed
             completed(c,track_id,urlparse(json.loads(row['metadata']).get('bandcamp_url','')).hostname,media_host,time.time())
             db.set_setting(c,'download_status','Library only · 10,000 tracks' if library_only(c) else 'Standing by')
+        telemetry.emit('download.completed',track_id=track_id,duration=time.monotonic()-download_started)
         return True
     except Exception as error:
         partial.unlink(missing_ok=True)
@@ -250,7 +258,7 @@ def process_job(event):
             if acquire(track_id):
                 with db.transaction() as c:
                     requested = c.execute("SELECT 1 FROM requests WHERE track_id=? AND status IN ('pending','playing')",(track_id,)).fetchone()
-                    if plan['kind'] != 'request' and not requested:
+                    if plan['kind'] not in {'request','listen'} and not requested:
                         c.execute('INSERT OR IGNORE INTO playlist(track_id,priority) VALUES(?,?)',
                                   (track_id,1 if plan['kind'] in {'boost','recovery'} else 0))
                     plan.setdefault('completed',[]).append(track_id)
@@ -258,6 +266,8 @@ def process_job(event):
             elif plan['kind'] == 'request':
                 with db.transaction() as c:
                     c.execute("UPDATE requests SET status='failed',response=response || ' Download unavailable: the library limit has been reached.' WHERE id=? AND status='pending'",(event['request_id'],))
+        except TrackReserved:
+            raise  # Another consumer is acquiring this recording; retry without quarantining it.
         except Exception as error:
             log.error('Download failed for %s (source URL omitted)',track_id)
             from app.download_failures import record,alternative
@@ -274,6 +284,9 @@ def process_job(event):
                     else:
                         c.execute("UPDATE requests SET status='failed',response=response || ' Download failed; please choose another track.' WHERE id=? AND status='pending'",(event.get('request_id'),))
                 c.execute('UPDATE jobs SET body=? WHERE id=?',(json.dumps(plan),event['id']))
+    if plan['kind']=='listen':
+        from app import telemetry
+        telemetry.emit('preparation.completed' if plan.get('completed') else 'preparation.failed',job_id=event['id'],track_id=event['track_id'],outcome='success' if plan.get('completed') else 'failure')
     if plan['kind'] in {'boost','request'}:
         from app.events import fulfill_genre
         for track_id in plan.get('completed',[]):
@@ -294,6 +307,12 @@ def plan_refill(event):
         capped=library_only(c)
         rows=c.execute("SELECT * FROM tracks WHERE status IN ('available','ready') AND id NOT IN (SELECT track_id FROM playlist)").fetchall()
         active={r[0] for r in c.execute('SELECT track_id FROM plays WHERE actual_end IS NULL AND ends>?',(time.time(),))}
+        history=c.execute("SELECT track_id,json_extract(metadata,'$.genre') AS genre,COUNT(*) AS n,MAX(starts) AS last FROM plays WHERE starts<=? AND (actual_end IS NULL OR actual_end>starts) GROUP BY track_id,json_extract(metadata,'$.genre')",(time.time(),)).fetchall()
+        counts={};last_played={};genre_last={}
+        for play in history:
+            counts[play['track_id']]=counts.get(play['track_id'],0)+play['n']
+            last_played[play['track_id']]=max(last_played.get(play['track_id'],0),play['last'])
+            genre_last[play['genre']]=max(genre_last.get(play['genre'],0),play['last'])
     fresh=[];candidates=[]
     for row in rows:
         meta=json.loads(row['metadata'])
@@ -301,7 +320,7 @@ def plan_refill(event):
         if row['status']!='ready' and (capped or not row['source'] or not row['rights']):continue
         candidates.append(meta)
         if row['status']!='ready':fresh.append(meta)
-    selected=diverse_sample(fresh) or diverse_sample(candidates)
+    selected=balanced_sample(candidates,{t['id'] for t in fresh},counts,last_played,genre_last)
     plan={'tracks':[t['id'] for t in selected],'kind':'refill','completed':[]}
     with db.transaction() as c:
         existing=c.execute('SELECT body,done FROM jobs WHERE id=?',(event['id'],)).fetchone()

@@ -54,3 +54,38 @@ def test_request_intro_is_play_specific_and_race_checked(metadata):
         assert c.execute('SELECT COUNT(*) FROM plays').fetchone()[0]==0
     play=station.select_next(1000,expected_track_id='track-a',expected_request_id='request-a')
     assert play[0]['requested'] is True
+
+
+def test_track_playback_counts_filters_and_sorting(metadata,monkeypatch):
+    import time
+    monkeypatch.setenv('ADMIN_PASSWORD','secret')
+    now=time.time()
+    with db.transaction() as c:
+        for track,count in [('a',0),('b',2),('c',10),('d',11)]:
+            c.execute('INSERT INTO tracks(id,metadata,status) VALUES(?,?,?)',(track,json.dumps(dict(metadata,title=track)),'ready'))
+            for n in range(count):
+                c.execute('INSERT INTO plays(id,track_id,metadata,starts,ends,actual_end) VALUES(?,?,?,?,?,?)',
+                          (f'{track}-{n}',track,json.dumps(metadata),now-100,now-50,now-60))
+        for pid,start,finish in [('future',now+100,None),('aborted',now-100,now-101),('intro',now-100,None)]:
+            c.execute('INSERT INTO plays(id,track_id,metadata,starts,ends,actual_end) VALUES(?,?,?,?,?,?)',
+                      (pid,'a',json.dumps(metadata),start,start+200,finish))
+        db.set_setting(c,'announcement_on_air',json.dumps({'play_id':'intro'}))
+    client=TestClient(app)
+    def query(**params):
+        return client.get('/api/admin/repository/tracks',params=params,auth=('admin','secret'))
+    data=query(sort='play_count',direction='asc',page_size=2).json()
+    assert [(r['id'],r['play_count']) for r in data['items']]==[('a',0),('b',2)]
+    assert data['total']==4 and data['pages']==2
+    assert [r['id'] for r in query(sort='play_count',direction='asc',page_size=2,page=2).json()['items']]==['c','d']
+    data=query(min_plays=2,max_plays=10,sort='play_count',direction='desc',start=1,end=2).json()
+    assert [(r['id'],r['play_count']) for r in data['items']]==[('c',10),('b',2)]
+    assert data['total']==2 and not data['date_filter_applied']
+    assert query(max_plays=0).json()['items'][0]['id']=='a'
+    assert query(min_plays=10,q='"title": "c"').json()['total']==1
+    assert query(min_plays=12).json()['total']==0
+    assert [r['id'] for r in query(sort='title',direction='asc').json()['items']]==['a','b','c','d']
+    for params in [dict(min_plays=-1),dict(max_plays=1.5),dict(min_plays=10,max_plays=2),dict(sort='invalid'),dict(direction='invalid')]:
+        assert query(**params).status_code==422
+    with db.transaction() as c:
+        db.set_setting(c,'announcement_on_air','null')
+    assert query(q='"title": "a"',max_plays=1).json()['items'][0]['play_count']==1

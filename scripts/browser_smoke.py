@@ -49,6 +49,29 @@ with sync_playwright() as p:
         for title in ['Source hosts','Requests and chat','Reaction events','Successful downloads','Crawler runs','Artwork videos','Stored objects','Failed downloads','Tracks']:
             admin.get_by_role('button',name=title,exact=True).click()
             admin.wait_for_function('(title)=>document.querySelector("#table-title").textContent===title',arg=title)
+        if '--playback-check' in sys.argv:
+            def counts():
+                return admin.locator('#rows tr td:nth-child(3)').all_text_contents()
+            admin.get_by_role('button',name='Playbacks ↓',exact=True).wait_for()
+            values=list(map(int,counts()))
+            assert values==sorted(values,reverse=True)
+            with admin.expect_response(lambda r:'/repository/tracks?' in r.url and 'direction=asc' in r.url):
+                admin.get_by_role('button',name='Playbacks ↓',exact=True).click()
+            admin.get_by_role('button',name='Playbacks ↑',exact=True).wait_for()
+            values=list(map(int,counts()))
+            assert values==sorted(values)
+            admin.locator('#min-plays').fill('2')
+            with admin.expect_response(lambda r:'/repository/tracks?' in r.url and 'max_plays=10' in r.url) as filtered:
+                admin.locator('#max-plays').fill('10')
+            expected=filtered.value.json()
+            admin.wait_for_function('(n)=>document.querySelector("#pagination").textContent.includes(n.toLocaleString()+" records")',arg=expected['total'])
+            assert all(2<=int(value)<=10 for value in counts())
+            admin.locator('#min-plays').fill('11')
+            admin.wait_for_function('document.querySelector("#error").textContent.includes("Minimum playbacks")')
+            with admin.expect_response(lambda r:'/repository/tracks?' in r.url and 'min_plays' not in r.url):
+                admin.locator('#clear-plays').click()
+            admin.wait_for_function('!document.querySelector("#error").textContent')
+            print(json.dumps({'playback_filters_verified':True,'sorting_verified':True,'matching_tracks':expected['total']}))
         admin.screenshot(path=str(out/'admin-desktop.png'),full_page=True)
         admin.set_viewport_size({'width':390,'height':844})
         assert admin.locator('body').evaluate('(e)=>e.scrollWidth<=innerWidth')
@@ -57,6 +80,9 @@ with sync_playwright() as p:
         assert not admin_errors,admin_errors
         print(json.dumps({'admin_verified':True,'pagination_verified':True,'responsive':True}))
         context.close()
+        if '--playback-check' in sys.argv:
+            browser.close()
+            sys.exit(0)
     page=browser.new_page(viewport={'width':1440,'height':1050},device_scale_factor=1)
     errors=[]
     page.on('pageerror',lambda e: errors.append(str(e)))

@@ -13,6 +13,7 @@ function showStatus(s){
   serverOffset=s.server_time*1000-Date.now();
   $('demo-banner').hidden=!s.demo;
   const play=s.play, m=play?.metadata || s.announcement?.metadata;
+  if(play?.track_id)window.Activity?.select(play.track_id,'live');
   $('announcer-panel').hidden=!s.announcement;
   $('announcer-script').textContent=s.announcement?.script || '';
   $('announcer-source').hidden=!s.announcement?.source;
@@ -22,6 +23,8 @@ function showStatus(s){
   $('title').textContent=m?.title || 'Good things are on the way.';
   $('artist').textContent=m?.artists.join(' & ') || 'Your next discovery starts here.';
   $('album').textContent=m?.album || (s.demo?'Preparing a demo transmission':'Add authorized audio to bring the station to life.');
+  if(m?.artist_pages){$('artist').replaceChildren();m.artist_pages.forEach((artist,i)=>{if(i)$('artist').append(document.createTextNode(' & '));const a=node('a',artist.name);a.href='/artists/'+artist.id;$('artist').append(a);});}
+  if(m?.album_page){const a=node('a',m.album_page.name);a.href='/albums/'+m.album_page.id;$('album').replaceChildren(a);}
   $('bandcamp').hidden=!m?.bandcamp_url;
   if(m?.bandcamp_url)$('bandcamp').href=m.bandcamp_url;
   $('license').hidden=!m?.license_url;
@@ -128,17 +131,19 @@ function tick(){
 }
 setInterval(tick,1000);
 let reconnectTimer=null,reconnectAttempt=0,playbackEpoch=0;
-function stop(){playbackEpoch++;clearTimeout(reconnectTimer);reconnectTimer=null;reconnectAttempt=0;tuned=false;audio.pause();audio.removeAttribute('src');audio.load();document.body.classList.remove('playing');$('play-icon').textContent='▶';$('play-label').textContent='Tune in';$('audio-status').textContent='Live together, wherever you are.';}
+function stop(){window.Activity?.emit('live.tune_out',{mode:'live'});playbackEpoch++;clearTimeout(reconnectTimer);reconnectTimer=null;reconnectAttempt=0;tuned=false;audio.pause();audio.removeAttribute('src');audio.load();document.body.classList.remove('playing');$('play-icon').textContent='▶';$('play-label').textContent='Tune in';$('audio-status').textContent='Live together, wherever you are.';}
 async function startPlayback(automatic=false){
   if(tuned)return;
   autoplayBlocked=false;
   tuned=true;$('play-icon').textContent='■';$('play-label').textContent='Tune out';$('audio-status').textContent='Connecting to the live frequency…';
+  window.Activity?.clicked(state?.play?.track_id||null,'live');
+  window.Activity?.emit('live.tune_in',{mode:'live'});
   audio.src='/api/live';audio.volume=Number($('volume').value);
   // Create/resume Web Audio in a user gesture; do not route successful autoplay into a suspended context.
   if(!automatic)enableAnalyser();
   const epoch=++playbackEpoch;
   try{await audio.play();if(automatic && navigator.userActivation?.hasBeenActive)enableAnalyser();}
-  catch(e){if(tuned&&epoch===playbackEpoch){if(e.name==='NotAllowedError'){stop();autoplayBlocked=true;$('audio-status').textContent='Tap anywhere to enable sound — your browser blocked autoplay.';}else reconnectAudio();}}
+  catch(e){if(tuned&&epoch===playbackEpoch){if(e.name==='NotAllowedError'){window.Activity?.emit('playback.blocked',{mode:'live',error_code:'autoplay'});stop();autoplayBlocked=true;$('audio-status').textContent='Tap anywhere to enable sound — your browser blocked autoplay.';}else reconnectAudio();}}
 }
 function enableAnalyser(){
   try{
@@ -181,7 +186,7 @@ reduceMotion.addEventListener('change',()=>{motionPaused=reduceMotion.matches;if
 document.addEventListener('visibilitychange',()=>{if(state)syncVisual(state);});
 audio.onplaying=()=>{clearTimeout(reconnectTimer);reconnectTimer=null;reconnectAttempt=0;enableAnalyser();document.body.classList.add('playing');$('audio-status').textContent='You’re on the live frequency.';};
 audio.onwaiting=()=>{if(tuned)$('audio-status').textContent='Waiting for the live signal…';};
-function reconnectAudio(){
+function reconnectAudio(){window.Activity?.emit('playback.reconnect',{mode:'live'});
   if(!tuned||reconnectTimer)return;
   document.body.classList.remove('playing');
   $('audio-status').textContent='Signal interrupted. Reconnecting to the live frequency…';

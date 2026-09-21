@@ -189,14 +189,31 @@ def test_recovery_discovers_when_catalog_exhausted_and_stops_at_cap(metadata,mon
 
 def test_refill_search_does_not_hold_writer_lock(metadata,monkeypatch):
     for i in range(10):add(str(i),{**metadata,'genre':str(i),'artists':[str(i)]})
-    real=downloads.diverse_sample
-    def check(pool):
+    real=downloads.balanced_sample
+    def check(pool,*args):
         with db.connect() as c:
             c.execute('PRAGMA busy_timeout=50')
             c.execute('BEGIN IMMEDIATE')
             db.set_setting(c,'independent-writer','worked')
-        return real(pool)
-    monkeypatch.setattr(downloads,'diverse_sample',check)
+        return real(pool,*args)
+    monkeypatch.setattr(downloads,'balanced_sample',check)
     plan,_=downloads.plan_job({'kind':'refill','id':'unlocked-refill'})
     assert len(plan['tracks'])==10
     with db.connect() as c:assert db.setting(c,'independent-writer')=='worked'
+
+
+def test_refill_keeps_nine_fresh_genres_and_least_played_repeat(metadata):
+    for i in range(9):
+        meta={**metadata,'genre':str(i),'artists':[str(i)]}
+        add('new-'+str(i),meta)
+        add('old-'+str(i),meta,'ready',1)
+    meta={**metadata,'genre':'tenth','artists':['tenth']}
+    add('often',meta,'ready',1)
+    add('rare',meta,'ready',1)
+    with db.transaction() as c:
+        for i in range(5):
+            c.execute('INSERT INTO plays(id,track_id,metadata,starts,ends,actual_end) VALUES(?,?,?,?,?,?)',
+                      (str(i),'often',json.dumps(meta),i+1,i+2,i+2))
+    plan,_=downloads.plan_job({'kind':'refill','id':'balanced'})
+    assert set(plan['tracks'])=={'rare'}|{'new-'+str(i) for i in range(9)}
+    assert downloads.plan_job({'kind':'refill','id':'balanced'})[0]==plan

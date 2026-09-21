@@ -27,12 +27,21 @@ STATIC = Path(__file__).parent / 'static'
 @asynccontextmanager
 async def lifespan(app):
     db.init()
+    from app import telemetry
+    telemetry.emit('service.started')
     yield
 
 app = FastAPI(title='RadioWorkx',version='0.1.0',lifespan=lifespan)
 app.mount('/static',StaticFiles(directory=STATIC),name='static')
 from app.admin import router as admin_router, authorize
 app.include_router(admin_router)
+from app.library import router as library_router
+app.include_router(library_router)
+from app.telemetry_api import router as activity_router, ActivityMiddleware
+app.include_router(activity_router)
+from app.activity_admin import router as activity_admin_router
+app.include_router(activity_admin_router)
+app.add_middleware(ActivityMiddleware)
 
 
 def listener(request):
@@ -45,6 +54,10 @@ def listener(request):
 def index(request: Request):
     version=hashlib.sha256(b''.join((STATIC / name).read_bytes() for name in ('app.js','style.css','index.html'))).hexdigest()[:12]
     html=(STATIC / 'index.html').read_text().replace('/static/app.js',f'/static/app.js?v={version}').replace('/static/style.css',f'/static/style.css?v={version}')
+    return listener_page(request,html)
+
+
+def listener_page(request,html):
     response = HTMLResponse(html,headers={'Cache-Control':'no-store'})
     cookie = request.cookies.get('radio_listener','')
     try:
@@ -72,6 +85,12 @@ def status():
         play = now_playing(c)
         from app.announcer import on_air
         announcement = on_air(c,time.time())
+        from app.library import artist_ref, album_ref
+        for current in (play,announcement):
+            if current:
+                meta=current['metadata']
+                meta['artist_pages']=[artist_ref(a) for a in meta['artists']]
+                meta['album_page']=album_ref(meta)
         preview_play = play
         if announcement:
             reserved=c.execute('SELECT ends FROM plays WHERE id=?',(announcement['play_id'],)).fetchone()

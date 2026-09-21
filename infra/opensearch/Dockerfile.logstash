@@ -1,0 +1,2 @@
+FROM docker.elastic.co/logstash/logstash:9.5.4
+RUN LS_JAVA_OPTS="-Xms512m -Xmx2g -XX:+ExitOnOutOfMemoryError" bin/logstash-plugin install --version 2.1.1 logstash-output-opensearch

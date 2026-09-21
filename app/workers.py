@@ -72,6 +72,9 @@ def consume_once(name, wait=10):
     for message in messages:
         try:
             event = json.loads(message['Body'])
+            from app import telemetry
+            telemetry.emit('job.received',job_id=event.get('id'),queue=name,attempt=int(message.get('Attributes',{}).get('ApproximateReceiveCount',1)))
+            if int(message.get('Attributes',{}).get('ApproximateReceiveCount',1))>1:telemetry.emit('job.retried',job_id=event.get('id'),queue=name)
             with db.connect() as c:
                 finished=c.execute('SELECT done FROM outbox WHERE id=?',(event['id'],)).fetchone()
             if finished and finished['done'] is not None:
@@ -118,6 +121,10 @@ def consume_forever(name):
 
 def main():
     name = sys.argv[1]
+    os.environ['SERVICE_NAME']='radioworkx-'+name
+    from app import telemetry
+    telemetry.install_errors()
+    telemetry.emit('service.started')
     db.init()
     # Locks live on the shared volume, work across processes/containers, and release on crash.
     # SQLite transactions additionally serialize all capacity and history decisions.

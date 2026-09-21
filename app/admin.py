@@ -1,5 +1,6 @@
 """Authenticated operator dashboard, repository browsing and app-token management."""
 import hashlib
+import json
 import math
 import os
 import secrets
@@ -106,8 +107,12 @@ def overview(start:float|None=None,end:float|None=None):
 @router.get('/api/admin/repository/{kind}')
 def repository(kind:Literal['tracks','hosts','requests','reactions','downloads','crawls','visuals','objects','failed-downloads'],
                page:int=Query(1,ge=1,le=1000000),page_size:int=Query(25,ge=1,le=100),
-               q:str=Query('',max_length=100),start:float|None=None,end:float|None=None):
+               q:str=Query('',max_length=100),start:float|None=None,end:float|None=None,
+               sort:str|None=None,direction:Literal['asc','desc']='desc',
+               min_plays:int|None=Query(None,ge=0),max_plays:int|None=Query(None,ge=0)):
     start,end=window(start,end)
+    if min_plays is not None and max_plays is not None and min_plays>max_plays:
+        raise HTTPException(422,'Minimum playbacks cannot exceed maximum playbacks.')
     tables={
         'tracks':("tracks t","t.id,json_extract(t.metadata,'$.title') AS title,json_extract(t.metadata,'$.artists') AS artists,json_extract(t.metadata,'$.album') AS album,json_extract(t.metadata,'$.genre') AS genre,t.status,t.duration,t.downloaded_at,json_extract(t.metadata,'$.license_name') AS license,json_extract(t.metadata,'$.bandcamp_url') AS source",'t.metadata','t.id DESC',None),
         'hosts':('source_hosts h','h.hostname,h.provider,h.role,h.status,h.tracks_downloaded,h.notes,h.first_seen,h.last_seen','h.hostname','h.tracks_downloaded DESC,h.hostname',None),
@@ -123,6 +128,25 @@ def repository(kind:Literal['tracks','hosts','requests','reactions','downloads',
     values=['%'+q+'%']
     if date:where+=f' AND {date}>=? AND {date}<?';values.extend([start,end])
     with db.connect() as c:
+        if kind=='tracks':
+            intro=json.loads(db.setting(c,'announcement_on_air','null'))
+            table+=""" LEFT JOIN (
+                SELECT track_id,COUNT(*) AS play_count FROM plays
+                WHERE starts<=? AND (actual_end IS NULL OR actual_end>starts)
+                  AND id!=? GROUP BY track_id
+            ) pc ON pc.track_id=t.id"""
+            values=[time.time(),intro.get('play_id','') if intro else '']+values
+            columns=columns.replace(' AS title,',' AS title,COALESCE(pc.play_count,0) AS play_count,',1)
+            for bound,operator in [(min_plays,'>='),(max_plays,'<=')]:
+                if bound is not None:
+                    where+=f' AND COALESCE(pc.play_count,0){operator}?'
+                    values.append(bound)
+            allowed={'id','title','artists','album','genre','status','duration','downloaded_at','license','source','play_count'}
+            if sort is not None:
+                if sort not in allowed:raise HTTPException(422,'Unknown track sort column.')
+                order=f'{sort} {direction.upper()},t.id ASC'
+        elif sort is not None or min_plays is not None or max_plays is not None:
+            raise HTTPException(422,'Playback filters and sorting apply to tracks only.')
         total=c.execute('SELECT COUNT(*) FROM '+table+where,values).fetchone()[0]
         rows=[dict(r) for r in c.execute('SELECT '+columns+' FROM '+table+where+' ORDER BY '+order+' LIMIT ? OFFSET ?',values+[page_size,(page-1)*page_size])]
     for row in rows:

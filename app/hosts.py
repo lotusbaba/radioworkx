@@ -9,7 +9,7 @@ from app import db
 def provider(host):
     if re.fullmatch(r'[a-z0-9-]+\.bandcamp\.com',host) or host=='bandcamp.com': return 'bandcamp'
     if re.fullmatch(r't\d+\.bcbits\.com',host): return 'bandcamp'
-    if host=='archive.org' or re.fullmatch(r'ia\d+\.(?:us\.)?archive.org',host): return 'archive'
+    if host=='archive.org' or re.fullmatch(r'ia\d+\.(?:us\.)?archive.org',host) or re.fullmatch(r'dn\d+\.ca\.archive.org',host): return 'archive'
     return 'manual'
 
 

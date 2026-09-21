@@ -1,0 +1,85 @@
+title RadioWorkx current runtime and dual observability architecture
+
+participant "Listener browser\n(public)" as Browser
+participant "Tailscale Funnel\nHTTPS ingress" as Funnel
+participant "Nginx\n127.0.0.1:8001" as Proxy
+participant "FastAPI\napi / api-next" as API
+participant "SQLite + audio\nradio-data" as DB
+participant "Outbox dispatcher" as Dispatcher
+participant "LocalStack SQS" as SQS
+participant "Workers\ndownloads / reactions / crawler / visuals" as Workers
+participant "Station" as Station
+participant "Redis\naudio + events + demand" as Redis
+participant "Telemetry writer\nbounded async queue" as Telemetry
+participant "telemetry-data\nrotating ECS JSONL" as Files
+participant "Telemetry observer" as Observer
+participant "ELK Logstash\nindependent offset + queue" as ELKPipe
+participant "Elasticsearch\n127.0.0.1:9200" as ES
+participant "Kibana\n127.0.0.1:5601" as Kibana
+participant "OpenSearch ingest\nindependent offset + queue" as OSPipe
+participant "OpenSearch\n127.0.0.1:9201" as OS
+participant "OpenSearch Dashboards\n127.0.0.1:5602" as OSD
+participant "Operator / smoke test" as Operator
+
+note over Browser,Redis: Public listener and live-radio path
+Browser->Funnel: HTTPS page, API, SSE, and live-audio requests
+Funnel->Proxy: Forward to active loopback deployment
+Proxy->API: Route to api or api-next
+API->DB: Read/write sessions, requests, reactions, catalog and outbox
+API-->Browser: HTML/JSON; SSE and MP3 streams
+
+DB->Dispatcher: Unfinished durable outbox records
+Dispatcher->SQS: Publish reaction and work messages
+SQS->Workers: At-least-once delivery
+Workers->DB: Persist job and catalog outcomes
+Workers->Redis: Project reactions and publish events
+DB->Station: Select eligible track and cached introduction
+Station->DB: Record play before transmission
+Station->Redis: Publish paced MP3 chunks and track events
+Redis->API: Live audio, SSE snapshots and demand state
+
+note over Browser,Files: Telemetry producers never wait for Elasticsearch or OpenSearch
+Browser->API: POST /api/activity (cookie-bound batch)
+API->API: Validate origin, age, schema, actions and rate
+API->Telemetry: Enqueue sanitized browser event
+API-->Browser: 202 Accepted
+API->Telemetry: Enqueue API latency/outcome and domain events
+Workers->Telemetry: Enqueue job lifecycle and worker errors
+Telemetry->DB: Enrich event with allowlisted track metadata
+Telemetry->Files: Append ECS JSON; rotate bounded files
+
+loop Every 2 seconds
+  Observer->DB: Read durable plays, requests, jobs and downloads
+  Observer->Observer: Deduplicate outcomes in observer.sqlite
+  Observer->Telemetry: Enqueue newly observed lifecycle events
+end
+
+par Independent ELK ingestion
+  Files->ELKPipe: Tail JSONL using ELK sincedb
+  ELKPipe->ES: Bulk index by event.id into daily index
+  Kibana->ES: Query radioworkx-events-*
+else Independent OpenSearch ingestion
+  Files->OSPipe: Tail same JSONL using separate sincedb
+  OSPipe->OS: Bulk index by event.id into daily index
+  OSD->OS: Query radioworkx-events-*
+end
+
+note over ES,OS: Both stores retain their own data and ingestion state; current policy deletes activity indices after 30 days
+
+note over Operator,OSD: OpenSearch smoke verification
+Operator->Browser: Open /artists in headless Chrome
+Browser->API: POST /api/activity page.view
+API->Telemetry: Queue event with hashed event.id and session.id
+API-->Browser: 202 response matches expect_response predicate
+Telemetry->Files: Persist the event
+Files->OSPipe: Tail event
+OSPipe->OS: Index event
+loop Until visible or timeout
+  Operator->OS: Search by action + session + timestamp
+  OS-->Operator: Matching hit
+end
+Operator->ES: Search for the same event.id
+ES-->Operator: Exactly one matching hit
+Operator->OSD: Open native activity overview
+OSD->OS: Load saved visualizations and audit table
+OSD-->Operator: Render dashboard for screenshot/assertions

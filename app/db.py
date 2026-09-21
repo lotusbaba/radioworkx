@@ -5,6 +5,8 @@ from contextlib import contextmanager
 from app.config import DATA
 
 SCHEMA = """
+CREATE TABLE IF NOT EXISTS personal_downloads (listener TEXT NOT NULL, created REAL NOT NULL);
+CREATE INDEX IF NOT EXISTS personal_download_time ON personal_downloads(created);
 CREATE TABLE IF NOT EXISTS failed_downloads (
  id TEXT PRIMARY KEY, job_id TEXT NOT NULL, track_id TEXT NOT NULL,
  kind TEXT NOT NULL, source_url TEXT, page_url TEXT, error_type TEXT NOT NULL,

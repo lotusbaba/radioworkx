@@ -14,12 +14,16 @@ x-app: &app
     REACTION_THRESHOLD: ${REACTION_THRESHOLD:-20}
     DOWNLOAD_HOSTS: ${DOWNLOAD_HOSTS:-}
     DEMO_MODE: ${DEMO_MODE:-0}
+    TELEMETRY_ENABLED: "1"
+    TELEMETRY_DIR: /telemetry
+    ELASTICSEARCH_URL: http://elasticsearch:9200
     VIDEOS_ENABLED: ${VIDEOS_ENABLED:-1}
     MEDIA_BUCKET: ${MEDIA_BUCKET:-radioworkx-media}
     CRAWLER_ENABLED: ${CRAWLER_ENABLED:-1}
     CRAWLER_PAGE_BUDGET: ${CRAWLER_PAGE_BUDGET:-20}
   volumes:
     - radio-data:/data
+    - telemetry-data:/telemetry
   restart: unless-stopped
   depends_on:
     redis:
@@ -105,7 +109,86 @@ services:
       ANNOUNCER_VOICE: ${ANNOUNCER_VOICE:-onyx}
       ANNOUNCER_GAIN_DB: ${ANNOUNCER_GAIN_DB:-6}
     command: ["python", "-m", "app.workers", "station"]
+  telemetry-observer:
+    <<: *app
+    command: ["python", "-m", "app.telemetry_collector"]
+    environment:
+      <<: *env
+      SERVICE_NAME: radioworkx-observer
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:9.5.4
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      ES_JAVA_OPTS: -Xms768m -Xmx768m
+    mem_limit: 2g
+    volumes: ["elastic-data:/usr/share/elasticsearch/data"]
+    ports: ["127.0.0.1:9200:9200"]
+    restart: unless-stopped
+  logstash:
+    image: docker.elastic.co/logstash/logstash:9.5.4
+    environment:
+      LS_JAVA_OPTS: -Xms256m -Xmx256m
+    mem_limit: 768m
+    volumes:
+      - telemetry-data:/telemetry:ro
+      - logstash-data:/usr/share/logstash/data
+      - ./infra/elk/logstash.conf:/usr/share/logstash/pipeline/logstash.conf:ro
+      - ./infra/elk/logstash.yml:/usr/share/logstash/config/logstash.yml:ro
+    depends_on: [elasticsearch]
+    restart: unless-stopped
+  kibana:
+    image: docker.elastic.co/kibana/kibana:9.5.4
+    environment:
+      ELASTICSEARCH_HOSTS: http://elasticsearch:9200
+      TELEMETRY_ENABLED: "false"
+      XPACK_SECURITY_ENABLED: "false"
+      NODE_OPTIONS: --max-old-space-size=768
+    mem_limit: 1280m
+    ports: ["127.0.0.1:5601:5601"]
+    depends_on: [elasticsearch]
+    restart: unless-stopped
+  opensearch:
+    image: opensearchproject/opensearch:3.8.0
+    environment:
+      discovery.type: single-node
+      DISABLE_INSTALL_DEMO_CONFIG: "true"
+      DISABLE_SECURITY_PLUGIN: "true"
+      OPENSEARCH_JAVA_OPTS: -Xms768m -Xmx768m
+    mem_limit: 2g
+    volumes: ["opensearch-data:/usr/share/opensearch/data"]
+    ports: ["127.0.0.1:9201:9200"]
+    restart: unless-stopped
+  opensearch-ingest:
+    build:
+      context: ./infra/opensearch
+      dockerfile: Dockerfile.logstash
+    environment:
+      LS_JAVA_OPTS: -Xms256m -Xmx256m
+    mem_limit: 768m
+    volumes:
+      - telemetry-data:/telemetry:ro
+      - opensearch-ingest-data:/usr/share/logstash/data
+      - ./infra/opensearch/logstash.conf:/usr/share/logstash/pipeline/logstash.conf:ro
+      - ./infra/elk/logstash.yml:/usr/share/logstash/config/logstash.yml:ro
+    depends_on: [opensearch]
+    restart: unless-stopped
+  opensearch-dashboards:
+    image: opensearchproject/opensearch-dashboards:3.8.0
+    environment:
+      OPENSEARCH_HOSTS: '["http://opensearch:9200"]'
+      DISABLE_SECURITY_DASHBOARDS_PLUGIN: "true"
+      NODE_OPTIONS: --max-old-space-size=768
+    mem_limit: 1280m
+    ports: ["127.0.0.1:5602:5601"]
+    depends_on: [opensearch]
+    restart: unless-stopped
 volumes:
+  opensearch-data:
+  opensearch-ingest-data:
+  telemetry-data:
+  elastic-data:
+  logstash-data:
   localstack-data:
   radio-data:
   redis-data:

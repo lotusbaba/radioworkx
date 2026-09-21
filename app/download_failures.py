@@ -28,6 +28,7 @@ def record(c,event,track_id,error):
 
 def alternative(c,event,plan,meta):
     from app.downloads import library_only
+    if event['kind']=='listen':return None  # Personal playback must retain the exact recording.
     if event['kind']=='request':
         request=c.execute('SELECT requested_genre FROM requests WHERE id=?',(event.get('request_id'),)).fetchone()
         if not request or not request['requested_genre']:return None  # Preserve exact requested identity.

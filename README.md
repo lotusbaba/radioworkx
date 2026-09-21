@@ -1,4 +1,4 @@
-# RadioWorkx
+# RadioWorkx - AI Radio
 
 A shared live radio website with a **FastAPI backend**, Bandcamp catalog, emoji reactions over **SSE**, **SQS on the [lotusbaba/localstack fork](https://github.com/lotusbaba/localstack)**, and genre rankings in a **Redis sorted set**.
 
@@ -67,9 +67,9 @@ The scheduler checks these **immediately before transmitting**, including priori
 
 These are the requested [SoundExchange performance-complement limits](https://www.soundexchange.com/service-provider/licensing-101/). Every play is recorded durably before its first audio bytes. A performance that overlaps the start of the rolling window still counts. Repeated recordings count as further transmissions. All featured artists are checked. Compilation identity has its own limit, and the album limit also applies conservatively when both identities are supplied. Silence does not reset consecutive history.
 
-There is one common station feed. Applying the rules to the entire station’s transmission history is **more restrictive than a per-listener ledger**, and protects every listener regardless of reconnects or new cookies. If every queued track would violate a limit, the station waits. Reactions never bypass the check or guarantee which track plays next. A restart ends an interrupted performance and chooses a new eligible track rather than restarting the recording.
+There is one common live station feed, alongside separate personal playback from artist and album pages. Applying the rules to the entire station’s transmission history is **more restrictive than a per-listener ledger**, and protects every listener regardless of reconnects or new cookies. If every queued track would violate a limit, the station waits. Reactions never bypass the check or guarantee which track plays next. A restart ends an interrupted performance and chooses a new eligible track rather than restarting the recording.
 
-These scheduling rules alone do **not** establish eligibility for a statutory license. SoundExchange also describes noninteractive operation, restrictions on advance playlists and short continuous programs, recording/composition rights, payments, and reporting. At the user’s request, the app now publishes upcoming track identities and download progress. The playlist display and listener requests are intended for the directly licensed Creative Commons catalog and is not a claim of eligibility for the statutory noninteractive license. There is still no on-demand audio endpoint. Reaction-driven programming and your proposed service still need the applicable rights and eligibility review; this project does not certify compliance or produce royalty reports. See [SoundExchange licensing guidance](https://www.soundexchange.com/service-provider/licensing-101/) and [reporting requirements](https://www.soundexchange.com/service-provider/reporting-requirements/).
+These scheduling rules alone do **not** establish eligibility for a statutory license. SoundExchange also describes noninteractive operation, restrictions on advance playlists and short continuous programs, recording/composition rights, payments, and reporting. At the user’s request, the app now publishes upcoming track identities and download progress. The playlist display and listener requests are intended for the directly licensed Creative Commons catalog and is not a claim of eligibility for the statutory noninteractive license. Artist and album pages now offer separate personal on-demand playback for available catalog recordings. Reaction-driven programming and your proposed service still need the applicable rights and eligibility review; this project does not certify compliance or produce royalty reports. See [SoundExchange licensing guidance](https://www.soundexchange.com/service-provider/licensing-101/) and [reporting requirements](https://www.soundexchange.com/service-provider/reporting-requirements/).
 
 ## Bandcamp catalog and audio sources
 
@@ -1253,3 +1253,168 @@ Verification:
 # Explicitly performs a real rollout of the current image while a browser listens:
 .venv/bin/python scripts/deployment_smoke.py
 ```
+
+
+## Artist and album library
+
+Open `/artists` or `/albums` to search the full catalog, including recordings not yet
+acquired. Every catalog artist (including featured collaborators) has a page, and
+albums are grouped by canonical album identity rather than title alone. Artist and
+album names in the live player link to these pages.
+
+Each available track has a personal Play button with native pause, seek and volume
+controls. Ready audio streams immediately; otherwise a deduplicated `listen` job on
+SQS request-downloads prepares the exact recording through existing license checks,
+source validation and the acquisition cap. Personal listening does not enqueue a
+station request or create a broadcast-history entry. Unavailable recordings remain
+visible with a disabled control. Source and license attribution appear on each track.
+This explicitly extends the original live-only player requirement.
+
+Public browse APIs: `/api/library/artists`, `/api/library/albums`, and each followed
+by `/{id}` for detail. Personal player: POST `/api/listen/{track_id}` to prepare,
+GET that path for readiness, and GET `/api/listen/{track_id}/audio` for seekable MP3.
+Preparation/audio require the site's listener cookie; new preparations are limited
+to ten per minute per listener. The existing app-token integration APIs remain gated.
+No private source URLs, filesystem paths or acquisition errors are returned.
+
+## Activity logging and ELK
+
+Structured browser/API/worker events flow through an asynchronous bounded writer to
+rotating JSON files on `telemetry-data`, then Logstash's persistent queue, daily
+Elasticsearch indices and Kibana. `telemetry-observer` watches durable station and
+request/job outcomes without restarting the live transmitter. It starts at first
+installation; it does not manufacture historical listener activity.
+
+Run `docker compose up -d elasticsearch logstash kibana telemetry-observer` and
+`.venv/bin/python scripts/setup_elk.py` to initialize retention and dashboards.
+Kibana is bound to the hosting Mac at `http://localhost:5601` and Elasticsearch at
+`http://localhost:9200`; neither is exposed through the public radio URL. The public
+site's authenticated `/admin` also includes a filtered activity timeline backed by
+Elasticsearch. Kibana dashboard links there work on the hosting Mac.
+
+Dashboards: Audience, Music engagement, Requests & downloads, Errors & admin audit.
+Filter by timestamp, pseudonymous user/session, action, track, artist, album and mode.
+Station broadcasts, personal playback starts and listening time are separate measures.
+Recent listeners are sessions with an engaged heartbeat in the past 90 seconds;
+visitor and listening metrics are estimates, and browser events are client reports.
+Playback duration uses wall time while playing, excluding pauses/buffering/seeks;
+background timer throttling or a force-closed browser can undercount. Completion and
+request conversion ratios are event ratios and may cross reporting-window boundaries.
+
+Search/chat text, passwords, authorization headers, cookies, IP addresses, raw user
+agents, signed audio URLs and exception messages are excluded. Events use allowlisted
+fields, coarse browser/device labels and HMAC listener pseudonyms. Browser ingestion
+requires the site's cookie, validates actions and payloads, rate-limits batches and
+uses stable IDs for Elasticsearch deduplication. It is not an authenticated human
+identity system. Basic-auth audit records credential checks per admin request.
+
+Retention: daily activity indices delete after 30 days. Each producer keeps up to
+five 20 MiB files; files older than seven days are removed by the observer. Logstash
+has a 256 MiB persistent queue. Applications have a 10,000-event in-memory buffer and
+report dropped counts with subsequent events; process crashes or a prolonged/full
+buffer can lose telemetry. Logging never waits for ELK on the playback path. Data
+volumes survive ordinary restarts; preserve the existing music/history volumes.
+
+Verification: `pytest -q`; `scripts/telemetry_smoke.py` exercises real personal audio,
+search/seek/pause/heartbeats, privacy, indexed session events, the admin view and all
+four Kibana dashboards. The browser smoke test creates activity, but does not submit
+station music requests or expose credentials.
+
+## OpenSearch activity dashboard
+
+OpenSearch runs alongside ELK with a native activity overview inspired by the
+[OVHcloud dashboard example](https://docs.ovhcloud.com/en/guides/manage-and-operate/observability/logs-data-platform/opensearch-dashboards).
+Open the [OpenSearch activity overview](http://localhost:5602/app/dashboards#/view/rwx-activity-overview)
+on the hosting Mac. It has a stacked event-action timeline, a category/action donut, and a full-width
+sortable audit table. Use the search bar, time picker and Add filter controls to
+inspect individual listeners, tracks, event actions, services or outcomes. The default
+window is 24 hours with 30-second refresh. Chart buckets show the most frequent
+categories/actions; the audit table searches all matching events.
+
+| Interface | Local address | Purpose |
+| --- | --- | --- |
+| OpenSearch Dashboards | [Activity overview](http://localhost:5602/app/dashboards#/view/rwx-activity-overview) | Event timeline, category breakdown, and audit table. |
+| OpenSearch API | `http://localhost:9201` | Search, event counts, and retention status. |
+| Kibana | [Audience dashboard](http://localhost:5601/app/dashboards#/view/rwx-audience) | Existing ELK audience, music, requests/downloads, and error dashboards. |
+| Elasticsearch API | `http://localhost:9200` | Existing ELK indices and the authenticated admin activity timeline. |
+
+`localhost` refers to the machine running your browser. These dashboard links work
+on the hosting Mac; opening them on another device does not connect to the Mac.
+
+### Install and configure
+
+For a new setup, install policy and mappings before starting the independent reader:
+
+```sh
+docker compose up -d opensearch opensearch-dashboards
+.venv/bin/python scripts/setup_opensearch.py
+docker compose up -d --build opensearch-ingest
+.venv/bin/python scripts/opensearch_smoke.py
+```
+
+Wait for the first Compose command to finish downloading and starting the containers
+before running setup. If setup times out during initialization, check the service logs
+below and rerun setup once the services are ready. The smoke script requires Playwright
+and local Chrome; it visits the public RadioWorkx artist directory to generate a real
+page-view event, then checks both logging systems and the local OpenSearch dashboard.
+
+OpenSearch and Dashboards are pinned to 3.8.0. OpenSearch's API is on loopback port
+9201; Dashboards is on loopback 5602. These local services have security plugins
+disabled and must remain loopback-only; they are not routed through the public radio
+URL. The admin page links to the local overview. ELK and its admin timeline continue
+to use Elasticsearch independently.
+
+The ingestion image uses Logstash 9.5.4 with `logstash-output-opensearch` 2.1.1.
+Its Dockerfile gives the plugin installer a 2 GiB Java heap; the running ingestion
+service uses a 256 MiB heap with a 768 MiB container memory limit.
+
+### Data flow and retention
+
+A separate Logstash process reads the same sanitized telemetry files with its own
+persistent file offsets and 256 MiB queue. Stable event IDs deduplicate repeated reads.
+It adds `radioworkx.category` from the action prefix for the donut. Existing retained
+files are read on first startup; activity older than those files is not backfilled
+from Elasticsearch. OpenSearch ISM deletes activity indices after 30 days from index
+creation. Preserve `opensearch-data` and `opensearch-ingest-data` on restarts. The
+existing event privacy and bounded-buffer limitations also apply here.
+
+`scripts/setup_opensearch.py --build-only` regenerates the saved objects in
+`infra/opensearch/dashboards.ndjson` without contacting the services. Setup can be
+rerun to restore the dashboard; it overwrites dashboard customizations and preserves
+an existing retention policy. No station restart or playback-history reset is needed.
+
+### Check status and troubleshoot
+
+These commands only inspect service status, logs, event counts, and retention:
+
+```sh
+docker compose ps opensearch opensearch-dashboards opensearch-ingest
+docker compose logs --tail 50 opensearch opensearch-dashboards opensearch-ingest
+curl -fsS 'http://127.0.0.1:9201/radioworkx-events-*/_count'
+curl -fsS 'http://127.0.0.1:9201/_plugins/_ism/explain/radioworkx-events-*'
+```
+
+The count is the number of indexed telemetry documents across all event indices,
+including browsing, API requests, playback, and worker activity. It is not a count
+of listeners or song plays. The ISM response should identify `radioworkx-30d` as the
+policy with `enabled: true` for each managed event index.
+
+If the dashboard is blank, open browser Developer Tools → Console and reload.
+Two import problems encountered during setup are fixed in the generator:
+
+- `Cannot read properties of null (reading 'version')`: dashboard panels require
+  explicit version metadata. Generated panels now include `version: 3.8.0`.
+- `Could not locate that index-pattern-field`: the index pattern needs field
+  definitions. Setup supplies initial definitions and discovers indexed fields
+  when events are available.
+
+To restore the generated dashboard and refresh its field definitions, run
+`.venv/bin/python scripts/setup_opensearch.py`, then reload the dashboard. Export
+any dashboard customizations first if you want to keep them: setup overwrites its
+saved objects. It does not delete event indices or playback history.
+
+Verification on September 20, 2026: a new browser page view reached OpenSearch and
+Elasticsearch with the same event ID; both charts and the audit table rendered with
+real events, newest first. Retention was active on both event indices. The full suite
+passed 147 tests before the dashboard import corrections; the three focused setup
+tests passed after those corrections, followed by the successful browser smoke check.

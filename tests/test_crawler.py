@@ -118,3 +118,10 @@ def test_partial_archive_failure_preserves_import_count(monkeypatch):
     with pytest.raises(crawler.ArchiveDeferred) as error:crawler.archive_discover()
     assert error.value.imported==5
     with db.connect() as c:assert db.setting(c,'archive-page-v2:None','1')=='1'
+
+
+def test_archive_storage_hosts_are_narrowly_validated():
+    assert hosts.valid_url('https://dn711203.ca.archive.org/0/items/test/audio.mp3','archive')=='dn711203.ca.archive.org'
+    for host in ['dn711203.ca.archive.org.evil.test','evil.ca.archive.org','dn711203.evil.archive.org','archive.org.evil.test','127.0.0.1']:
+        with pytest.raises(ValueError):hosts.valid_url('https://'+host+'/audio.mp3','archive')
+    with pytest.raises(ValueError):hosts.valid_url('http://dn711203.ca.archive.org/audio.mp3','archive')

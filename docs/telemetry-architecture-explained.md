@@ -49,6 +49,51 @@ Possibly lose telemetry
 Radio and API continue running
 ```
 
+### Why writer startup is locked
+
+`emit()` starts the background consumer lazily. The check and thread creation are
+protected by one process-local lock:
+
+```python
+with _lock:
+    if _thread is None or not _thread.is_alive():
+        _thread = threading.Thread(
+            target=consume_and_write_events,
+            name="telemetry-writer",
+            daemon=True,
+        )
+        _thread.start()
+```
+
+The lock makes the check-and-start sequence mutually exclusive. Without it, two API
+requests could interleave like this:
+
+```text
+Request thread A                    Request thread B
+----------------                    ----------------
+sees no live writer
+                                    sees no live writer
+starts writer A
+                                    starts writer B
+```
+
+The queue itself would remain safe: `queue.Queue` supports multiple producers and
+consumers, and one queued event would normally be returned to only one consumer. The
+problem is what each consumer creates after it starts. Every consumer constructs its
+own `RotatingFileHandler` for the same hostname-based JSONL file.
+
+Two independent handlers do not share a rotation lock. When the file approaches its
+20 MiB limit, both could decide that it needs rotating and concurrently rename the
+active file and its numbered backups. That can produce rotation errors, place events
+in unexpected backup files, or disrupt the intended four-file retention chain. Two
+consumers could also finish enrichment in a different order from the queue order, so
+the JSONL lines would reflect completion order rather than enqueue order.
+
+The lock therefore guarantees one queue consumer and one rotating-file handler for
+this output file within the process. It does not protect `_buffer`; the queue already
+provides its own synchronization. It also does not coordinate separate containers,
+which write hostname-specific files.
+
 Before writing an event, the background thread can query SQLite to enrich it with allowlisted track information:
 
 ```text
@@ -690,3 +735,114 @@ Elasticsearch  OpenSearch
 ```
 
 The essential design principle is that everything after the in-memory telemetry queue is asynchronous. A slow or unavailable analytics system should not stop the live station, although sufficiently long outages can eventually exhaust the bounded buffers and cause telemetry loss.
+
+---
+
+## Recommended AWS architecture for large-scale production
+
+This section is a future production recommendation, not the architecture currently
+deployed by RadioWorkx. If the station served hundreds of thousands of concurrent
+listeners, the API would need to scale horizontally across many tasks. A shared JSONL
+volume and application-managed file rotation would then be the wrong coordination
+point.
+
+The recommended telemetry path is:
+
+```text
+Listeners
+    ↓
+load balancer
+    ↓
+many ECS API tasks
+    │
+    │ structured JSON on stdout
+    ▼
+FireLens / Fluent Bit sidecar per task
+    │
+    ├── CloudWatch Logs
+    │
+    └── Amazon Data Firehose
+            ├── Amazon OpenSearch Service
+            └── Amazon S3 backup/archive
+```
+
+### Application responsibility
+
+Each API task should construct the same sanitized, identified and timestamped events,
+but write them as structured JSON to standard output. The application would no longer
+manage:
+
+- An in-process telemetry queue and writer thread
+- A telemetry writer startup lock
+- `RotatingFileHandler`
+- A shared telemetry volume
+- Application-owned log retention
+
+This keeps request handling independent of the destination and allows API tasks to be
+added, replaced or removed without coordinating access to a common file.
+
+### Collection, buffering and delivery
+
+Each ECS task should include a FireLens log-router container using AWS for Fluent Bit.
+FireLens collects the application container's structured output and routes it to AWS
+destinations. For high-throughput production workloads, filesystem buffering gives the
+router temporary local durability when a destination is slow or unavailable. Buffer
+capacity and the task's ephemeral storage must be sized for an explicit outage window;
+when that storage limit is exhausted, telemetry can still be lost.
+
+Relevant AWS guidance:
+
+- [Send Amazon ECS logs through FireLens](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/using_firelens.html)
+- [Configure Amazon ECS logging for high throughput](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/firelens-docker-buffer-limit.html)
+
+Data Firehose can batch delivery into Amazon OpenSearch Service for search and
+dashboards while retaining all source events—or only failed deliveries—in Amazon S3.
+OpenSearch remains the query-optimized copy; S3 provides the durable archive from which
+events can be replayed if an index must be rebuilt.
+
+- [Amazon Data Firehose destinations](https://docs.aws.amazon.com/firehose/latest/dev/)
+- [Configure Firehose S3 backup](https://docs.aws.amazon.com/firehose/latest/dev/create-configure-backup.html)
+
+### Ordering and replay when required
+
+Telemetry analytics should normally use `@timestamp`, `event.id`, `session.id`,
+`request_id`, `broadcast_id` and trace identifiers rather than assume one global arrival
+order across all API tasks.
+
+If a use case requires ordered processing and replay, place Amazon Kinesis Data Streams
+before the consumers:
+
+```text
+API tasks
+    ↓
+Kinesis Data Streams
+    ├── real-time consumers
+    └── Data Firehose → OpenSearch + S3
+```
+
+Choose a partition key for the entity whose lifecycle must remain together, such as a
+request ID, session ID or broadcast ID. Kinesis provides sequence numbers within the
+corresponding shard; it should not be treated as providing one global order for all
+station activity.
+
+- [Kinesis Data Streams concepts](https://docs.aws.amazon.com/streams/latest/dev/key-concepts.html)
+
+### Durable business events remain separate
+
+Operational telemetry is not the authoritative source for state transitions such as a
+request completing, a download succeeding or a broadcast ending. Those transitions
+should continue to be committed with application state through a transactional outbox.
+An outbox publisher can deliver them to SQS, EventBridge or Kinesis for downstream
+processing. The telemetry pipeline may consume copies for analytics, while the database
+and durable event path remain authoritative.
+
+The resulting separation is:
+
+```text
+Operational logs  → stdout → FireLens → CloudWatch / Firehose
+Metrics           → CloudWatch
+Traces            → OpenTelemetry collector
+Business events   → database outbox → SQS / EventBridge / Kinesis
+Search copy       → OpenSearch
+Durable archive   → S3
+```

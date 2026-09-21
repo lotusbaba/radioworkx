@@ -49,7 +49,7 @@ def enrich(event):
         m=json.loads(row['metadata']);event['radioworkx'].update(track_title=m.get('title'),artists=m.get('artists'),album=m.get('album'),album_id=m.get('album_id'),genre=m.get('genre'),provider=m.get('provider') or m.get('source_kind','catalog'))
 
 
-def writer():
+def consume_and_write_events():
     global _dropped
     directory=Path(os.getenv('TELEMETRY_DIR','/data/telemetry'));directory.mkdir(parents=True,exist_ok=True)
     handler=RotatingFileHandler(directory/(os.getenv('HOSTNAME','local')+'.jsonl'),maxBytes=20*1024*1024,backupCount=4)
@@ -72,7 +72,7 @@ def emit(action,**kwargs):
         event=make_event(action,**kwargs)
         with _lock:
             if _thread is None or not _thread.is_alive():
-                _thread=threading.Thread(target=writer,name='telemetry-writer',daemon=True);_thread.start()
+                _thread=threading.Thread(target=consume_and_write_events,name='telemetry-writer',daemon=True);_thread.start()
         _buffer.put_nowait(event)
     except Exception:_dropped+=1
 

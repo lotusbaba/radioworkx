@@ -197,6 +197,86 @@ Next scan sees same job
     → do not emit it again
 ```
 
+The observer first finds completed work in the main `radio.db` outbox. A simplified
+query for completed jobs is:
+
+```sql
+SELECT id, queue, body, created, done, failed
+FROM outbox
+WHERE created >= :observer_start
+  AND done IS NOT NULL;
+```
+
+Suppose that query returns a completed job whose `id` is `DOWNLOAD-42`. The observer
+constructs the deterministic deduplication key `job-done:DOWNLOAD-42`. It then checks
+the separate `observer.sqlite` database:
+
+```sql
+SELECT 1
+FROM seen
+WHERE id = 'job-done:DOWNLOAD-42';
+```
+
+### First scan
+
+On the first scan, the `SELECT` returns no row. The Python observer emits
+`job.completed`—or `job.failed` when the outbox `failed` column is non-null—and then
+records the key:
+
+```sql
+INSERT INTO seen (id, created)
+VALUES ('job-done:DOWNLOAD-42', :observed_unix_time);
+```
+
+The equivalent parameterized statements used by the implementation are:
+
+```python
+already_seen = state.execute(
+    "SELECT 1 FROM seen WHERE id=?",
+    ("job-done:DOWNLOAD-42",),
+).fetchone()
+
+if not already_seen:
+    telemetry.emit("job.completed", ...)
+    state.execute(
+        "INSERT INTO seen VALUES(?,?)",
+        ("job-done:DOWNLOAD-42", time.time()),
+    )
+    state.commit()
+```
+
+The telemetry event ID is also deterministic: the observer uses the SHA-256 digest
+of `job-done:DOWNLOAD-42`. That gives downstream indexing another layer of retry
+deduplication.
+
+### Next scan
+
+Two seconds later, the main-database query still returns the same completed outbox
+row. The observer repeats:
+
+```sql
+SELECT 1
+FROM seen
+WHERE id = 'job-done:DOWNLOAD-42';
+```
+
+This time it returns:
+
+```text
+1
+```
+
+Because a row exists, the observer returns from its `once(...)` helper before calling
+`telemetry.emit(...)`. It performs no second `INSERT`, so the same completed job does
+not generate another lifecycle event.
+
+Old deduplication markers are cleaned up with:
+
+```sql
+DELETE FROM seen
+WHERE created < :thirty_five_days_ago;
+```
+
 The observer reads the live database without restarting or inserting itself into the station’s playback path.
 
 ---

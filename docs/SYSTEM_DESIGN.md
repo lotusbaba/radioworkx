@@ -165,6 +165,329 @@ flowchart LR
 
 **Timing:** both acceptance and threshold processing must occur before the play ends. A delayed reaction still contributes to the genre demand ranking, but it cannot trigger a follow-up after the current track ends. No forced skipping or interruption occurs on a threshold crossing.
 
+## SQLite schema reference
+
+The application database is `radio.db` under `RADIO_DATA_DIR`. The definitions below
+reflect `app/db.py` after its startup migrations have added the announcement-reference
+columns to `tracks`, the response-context columns to `requests`, and the current
+non-unique reaction model. JSON is stored as `TEXT`; Unix timestamps are stored as
+`REAL`; SQLite uses `INTEGER` values for Boolean flags. `sqlite_sequence`, which
+SQLite creates automatically for `AUTOINCREMENT` tables, is not an application table.
+
+### Listener limits and acquisition failures
+
+```sql
+CREATE TABLE personal_downloads (
+    listener TEXT NOT NULL,
+    created REAL NOT NULL
+);
+
+CREATE TABLE failed_downloads (
+    id TEXT PRIMARY KEY,
+    job_id TEXT NOT NULL,
+    track_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    source_url TEXT,
+    page_url TEXT,
+    error_type TEXT NOT NULL,
+    error_detail TEXT NOT NULL,
+    created REAL NOT NULL,
+    replacement_id TEXT,
+    UNIQUE(job_id, track_id)
+);
+```
+
+`personal_downloads` is the per-listener preparation-rate ledger.
+`failed_downloads` retains acquisition failure and replacement history for operator
+diagnostics; its URLs and error details are private admin data.
+
+### Calling-application tokens
+
+```sql
+CREATE TABLE app_tokens (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    digest TEXT NOT NULL UNIQUE,
+    created REAL NOT NULL,
+    last_used REAL,
+    revoked REAL
+);
+```
+
+Only a SHA-256 token digest is stored. `revoked` is null while a token is active.
+
+### Catalog, playlist and broadcast history
+
+```sql
+CREATE TABLE tracks (
+    id TEXT PRIMARY KEY,
+    metadata TEXT NOT NULL,
+    source TEXT,
+    rights TEXT,
+    status TEXT NOT NULL DEFAULT 'available',
+    duration REAL,
+    path TEXT,
+    error TEXT,
+    downloaded_at REAL,
+    intro_id TEXT REFERENCES announcements(id),
+    requested_intro_id TEXT REFERENCES announcements(id)
+);
+
+CREATE TABLE playlist (
+    position INTEGER PRIMARY KEY AUTOINCREMENT,
+    track_id TEXT UNIQUE REFERENCES tracks(id),
+    priority INTEGER DEFAULT 0
+);
+
+CREATE TABLE plays (
+    id TEXT PRIMARY KEY,
+    track_id TEXT NOT NULL,
+    metadata TEXT NOT NULL,
+    starts REAL NOT NULL,
+    ends REAL NOT NULL,
+    actual_end REAL
+);
+```
+
+`tracks.metadata` is the canonical catalog snapshot. `playlist` contains automatic
+and priority selections still awaiting transmission. `plays` is immutable broadcast
+history except that `actual_end` is filled when the performance finishes or is
+interrupted.
+
+### Durable work, reactions and requests
+
+```sql
+CREATE TABLE outbox (
+    id TEXT PRIMARY KEY,
+    queue TEXT NOT NULL,
+    body TEXT NOT NULL,
+    created REAL NOT NULL,
+    sent REAL,
+    done REAL,
+    failed TEXT
+);
+
+CREATE TABLE reactions (
+    id TEXT PRIMARY KEY,
+    play_id TEXT NOT NULL,
+    listener TEXT NOT NULL,
+    emoji TEXT NOT NULL,
+    accepted REAL NOT NULL,
+    metadata TEXT NOT NULL,
+    processed INTEGER DEFAULT 0
+);
+
+CREATE TABLE requests (
+    sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+    id TEXT UNIQUE NOT NULL,
+    listener TEXT NOT NULL,
+    query TEXT NOT NULL,
+    mode TEXT NOT NULL,
+    response TEXT NOT NULL,
+    track_id TEXT REFERENCES tracks(id),
+    status TEXT NOT NULL,
+    created REAL NOT NULL,
+    play_id TEXT,
+    suggestions TEXT NOT NULL DEFAULT '[]',
+    sources TEXT NOT NULL DEFAULT '[]',
+    engine TEXT NOT NULL DEFAULT 'basic',
+    requested_genre TEXT NOT NULL DEFAULT ''
+);
+
+CREATE TABLE jobs (
+    id TEXT PRIMARY KEY,
+    body TEXT NOT NULL,
+    done INTEGER DEFAULT 0
+);
+```
+
+`outbox` is the dispatch and completion ledger. `jobs` stores consumer execution
+plans and progress using the same application job ID. Each accepted emoji is a
+separate `reactions` row. `requests.sequence` supplies FIFO ordering independently
+of the public UUID in `requests.id`.
+
+### Conversation and retrieval state
+
+```sql
+CREATE TABLE conversations (
+    listener TEXT PRIMARY KEY,
+    genres TEXT NOT NULL
+);
+
+CREATE TABLE rag_embeddings (
+    track_id TEXT PRIMARY KEY,
+    model TEXT NOT NULL,
+    digest TEXT NOT NULL,
+    vector TEXT NOT NULL
+);
+
+CREATE TABLE rag_pending (
+    listener TEXT PRIMARY KEY,
+    genres TEXT NOT NULL,
+    track_ids TEXT NOT NULL
+);
+
+CREATE TABLE rag_turns (
+    id TEXT PRIMARY KEY,
+    listener TEXT NOT NULL,
+    created REAL NOT NULL,
+    busy INTEGER NOT NULL DEFAULT 1
+);
+```
+
+`conversations` preserves per-listener conversational genre context.
+`rag_embeddings` caches serialized catalog vectors. `rag_pending` records choices
+awaiting confirmation, while `rag_turns` supports chat concurrency and rate tracking.
+
+### Announcements
+
+```sql
+CREATE TABLE announcements (
+    id TEXT PRIMARY KEY,
+    track_id TEXT NOT NULL,
+    script TEXT NOT NULL,
+    details TEXT NOT NULL,
+    path TEXT NOT NULL,
+    duration REAL NOT NULL,
+    created REAL NOT NULL,
+    voice TEXT NOT NULL
+);
+```
+
+An announcement row contains the validated script, supporting details, cached audio
+path, duration and voice. The two references on `tracks` distinguish normal and
+requested-play introductions.
+
+### Source discovery and crawler state
+
+```sql
+CREATE TABLE source_hosts (
+    hostname TEXT PRIMARY KEY,
+    provider TEXT NOT NULL,
+    role TEXT NOT NULL,
+    status TEXT NOT NULL,
+    discovered_from TEXT,
+    notes TEXT NOT NULL DEFAULT '',
+    first_seen REAL NOT NULL,
+    last_seen REAL NOT NULL,
+    tracks_downloaded INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE host_downloads (
+    track_id TEXT PRIMARY KEY,
+    source_host TEXT NOT NULL,
+    media_host TEXT,
+    completed REAL NOT NULL
+);
+
+CREATE TABLE crawl_frontier (
+    url TEXT PRIMARY KEY,
+    provider TEXT NOT NULL,
+    genre TEXT,
+    depth INTEGER NOT NULL DEFAULT 0,
+    discovered_from TEXT,
+    next_attempt REAL NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'pending',
+    error TEXT
+);
+
+CREATE TABLE crawl_runs (
+    id TEXT PRIMARY KEY,
+    started REAL NOT NULL,
+    finished REAL,
+    pages INTEGER NOT NULL DEFAULT 0,
+    tracks INTEGER NOT NULL DEFAULT 0,
+    errors INTEGER NOT NULL DEFAULT 0
+);
+```
+
+These are the full schemas for the four tables summarized under “Dynamic source
+crawler and host repository.” `host_downloads` is a per-track ledger, while
+`source_hosts.tracks_downloaded` is the atomically maintained aggregate.
+
+### Stored media and generated visuals
+
+```sql
+CREATE TABLE media_objects (
+    object_key TEXT PRIMARY KEY,
+    track_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    path TEXT NOT NULL,
+    mime TEXT NOT NULL,
+    checked REAL
+);
+
+CREATE TABLE track_visuals (
+    track_id TEXT PRIMARY KEY,
+    status TEXT NOT NULL,
+    created REAL NOT NULL,
+    submitted REAL,
+    completed REAL,
+    provider_id TEXT,
+    artwork_source TEXT,
+    artwork_key TEXT,
+    video_key TEXT,
+    error TEXT
+);
+```
+
+`media_objects` is the local/S3 object manifest. `track_visuals` tracks one visual
+generation lifecycle per track, including provider submission and cached keys.
+
+### Application settings
+
+```sql
+CREATE TABLE settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+```
+
+This key/value table contains durable station coordination state and feature latches.
+It is distinct from the telemetry observer's private `settings` table below.
+
+### Application indexes
+
+```sql
+CREATE INDEX personal_download_time
+    ON personal_downloads(created);
+
+CREATE INDEX request_pending
+    ON requests(status, sequence);
+
+CREATE INDEX reaction_play
+    ON reactions(play_id, processed);
+
+CREATE INDEX reaction_listener
+    ON reactions(listener, accepted);
+
+CREATE INDEX play_time
+    ON plays(ends);
+```
+
+Primary-key and unique declarations also create SQLite-managed indexes.
+
+### Telemetry observer database
+
+The observer uses a separate `/telemetry/observer.sqlite`, not `radio.db`:
+
+```sql
+CREATE TABLE settings (
+    key TEXT PRIMARY KEY,
+    value TEXT
+);
+
+CREATE TABLE seen (
+    id TEXT PRIMARY KEY,
+    created REAL
+);
+```
+
+Observer `settings` records its initial scan time and hashes of selected environment
+configuration. `seen` stores deterministic lifecycle keys so the two-second polling
+loop does not emit the same derived event repeatedly. Entries older than 35 days are
+periodically removed.
+
 ## API
 
 | Endpoint | Purpose |

@@ -176,26 +176,20 @@ SQLite creates automatically for `AUTOINCREMENT` tables, is not an application t
 
 ### Listener limits and acquisition failures
 
-```sql
-CREATE TABLE personal_downloads (
-    listener TEXT NOT NULL,
-    created REAL NOT NULL
-);
-
-CREATE TABLE failed_downloads (
-    id TEXT PRIMARY KEY,
-    job_id TEXT NOT NULL,
-    track_id TEXT NOT NULL,
-    kind TEXT NOT NULL,
-    source_url TEXT,
-    page_url TEXT,
-    error_type TEXT NOT NULL,
-    error_detail TEXT NOT NULL,
-    created REAL NOT NULL,
-    replacement_id TEXT,
-    UNIQUE(job_id, track_id)
-);
-```
+| Table | Column | Type | Constraints/default |
+| --- | --- | --- | --- |
+| `personal_downloads` | `listener` | `TEXT` | `NOT NULL` |
+| `personal_downloads` | `created` | `REAL` | `NOT NULL` |
+| `failed_downloads` | `id` | `TEXT` | `PRIMARY KEY` |
+| `failed_downloads` | `job_id` | `TEXT` | `NOT NULL`; part of `UNIQUE(job_id, track_id)` |
+| `failed_downloads` | `track_id` | `TEXT` | `NOT NULL`; part of `UNIQUE(job_id, track_id)` |
+| `failed_downloads` | `kind` | `TEXT` | `NOT NULL` |
+| `failed_downloads` | `source_url` | `TEXT` | Nullable |
+| `failed_downloads` | `page_url` | `TEXT` | Nullable |
+| `failed_downloads` | `error_type` | `TEXT` | `NOT NULL` |
+| `failed_downloads` | `error_detail` | `TEXT` | `NOT NULL` |
+| `failed_downloads` | `created` | `REAL` | `NOT NULL` |
+| `failed_downloads` | `replacement_id` | `TEXT` | Nullable |
 
 `personal_downloads` is the per-listener preparation-rate ledger.
 `failed_downloads` retains acquisition failure and replacement history for operator
@@ -203,51 +197,41 @@ diagnostics; its URLs and error details are private admin data.
 
 ### Calling-application tokens
 
-```sql
-CREATE TABLE app_tokens (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    digest TEXT NOT NULL UNIQUE,
-    created REAL NOT NULL,
-    last_used REAL,
-    revoked REAL
-);
-```
+| Column | Type | Constraints/default |
+| --- | --- | --- |
+| `id` | `TEXT` | `PRIMARY KEY` |
+| `name` | `TEXT` | `NOT NULL` |
+| `digest` | `TEXT` | `NOT NULL UNIQUE` |
+| `created` | `REAL` | `NOT NULL` |
+| `last_used` | `REAL` | Nullable |
+| `revoked` | `REAL` | Nullable |
 
 Only a SHA-256 token digest is stored. `revoked` is null while a token is active.
 
 ### Catalog, playlist and broadcast history
 
-```sql
-CREATE TABLE tracks (
-    id TEXT PRIMARY KEY,
-    metadata TEXT NOT NULL,
-    source TEXT,
-    rights TEXT,
-    status TEXT NOT NULL DEFAULT 'available',
-    duration REAL,
-    path TEXT,
-    error TEXT,
-    downloaded_at REAL,
-    intro_id TEXT REFERENCES announcements(id),
-    requested_intro_id TEXT REFERENCES announcements(id)
-);
-
-CREATE TABLE playlist (
-    position INTEGER PRIMARY KEY AUTOINCREMENT,
-    track_id TEXT UNIQUE REFERENCES tracks(id),
-    priority INTEGER DEFAULT 0
-);
-
-CREATE TABLE plays (
-    id TEXT PRIMARY KEY,
-    track_id TEXT NOT NULL,
-    metadata TEXT NOT NULL,
-    starts REAL NOT NULL,
-    ends REAL NOT NULL,
-    actual_end REAL
-);
-```
+| Table | Column | Type | Constraints/default |
+| --- | --- | --- | --- |
+| `tracks` | `id` | `TEXT` | `PRIMARY KEY` |
+| `tracks` | `metadata` | `TEXT` | `NOT NULL`; JSON |
+| `tracks` | `source` | `TEXT` | Nullable |
+| `tracks` | `rights` | `TEXT` | Nullable |
+| `tracks` | `status` | `TEXT` | `NOT NULL DEFAULT 'available'` |
+| `tracks` | `duration` | `REAL` | Nullable |
+| `tracks` | `path` | `TEXT` | Nullable |
+| `tracks` | `error` | `TEXT` | Nullable |
+| `tracks` | `downloaded_at` | `REAL` | Nullable |
+| `tracks` | `intro_id` | `TEXT` | Nullable; foreign key → `announcements(id)` |
+| `tracks` | `requested_intro_id` | `TEXT` | Nullable; foreign key → `announcements(id)` |
+| `playlist` | `position` | `INTEGER` | `PRIMARY KEY AUTOINCREMENT` |
+| `playlist` | `track_id` | `TEXT` | `UNIQUE`; foreign key → `tracks(id)` |
+| `playlist` | `priority` | `INTEGER` | `DEFAULT 0` |
+| `plays` | `id` | `TEXT` | `PRIMARY KEY` |
+| `plays` | `track_id` | `TEXT` | `NOT NULL` |
+| `plays` | `metadata` | `TEXT` | `NOT NULL`; JSON snapshot |
+| `plays` | `starts` | `REAL` | `NOT NULL` |
+| `plays` | `ends` | `REAL` | `NOT NULL` |
+| `plays` | `actual_end` | `REAL` | Nullable |
 
 `tracks.metadata` is the canonical catalog snapshot. `playlist` contains automatic
 and priority selections still awaiting transmission. `plays` is immutable broadcast
@@ -256,50 +240,39 @@ interrupted.
 
 ### Durable work, reactions and requests
 
-```sql
-CREATE TABLE outbox (
-    id TEXT PRIMARY KEY,
-    queue TEXT NOT NULL,
-    body TEXT NOT NULL,
-    created REAL NOT NULL,
-    sent REAL,
-    done REAL,
-    failed TEXT
-);
-
-CREATE TABLE reactions (
-    id TEXT PRIMARY KEY,
-    play_id TEXT NOT NULL,
-    listener TEXT NOT NULL,
-    emoji TEXT NOT NULL,
-    accepted REAL NOT NULL,
-    metadata TEXT NOT NULL,
-    processed INTEGER DEFAULT 0
-);
-
-CREATE TABLE requests (
-    sequence INTEGER PRIMARY KEY AUTOINCREMENT,
-    id TEXT UNIQUE NOT NULL,
-    listener TEXT NOT NULL,
-    query TEXT NOT NULL,
-    mode TEXT NOT NULL,
-    response TEXT NOT NULL,
-    track_id TEXT REFERENCES tracks(id),
-    status TEXT NOT NULL,
-    created REAL NOT NULL,
-    play_id TEXT,
-    suggestions TEXT NOT NULL DEFAULT '[]',
-    sources TEXT NOT NULL DEFAULT '[]',
-    engine TEXT NOT NULL DEFAULT 'basic',
-    requested_genre TEXT NOT NULL DEFAULT ''
-);
-
-CREATE TABLE jobs (
-    id TEXT PRIMARY KEY,
-    body TEXT NOT NULL,
-    done INTEGER DEFAULT 0
-);
-```
+| Table | Column | Type | Constraints/default |
+| --- | --- | --- | --- |
+| `outbox` | `id` | `TEXT` | `PRIMARY KEY` |
+| `outbox` | `queue` | `TEXT` | `NOT NULL` |
+| `outbox` | `body` | `TEXT` | `NOT NULL`; JSON |
+| `outbox` | `created` | `REAL` | `NOT NULL` |
+| `outbox` | `sent` | `REAL` | Nullable |
+| `outbox` | `done` | `REAL` | Nullable |
+| `outbox` | `failed` | `TEXT` | Nullable |
+| `reactions` | `id` | `TEXT` | `PRIMARY KEY` |
+| `reactions` | `play_id` | `TEXT` | `NOT NULL` |
+| `reactions` | `listener` | `TEXT` | `NOT NULL` |
+| `reactions` | `emoji` | `TEXT` | `NOT NULL` |
+| `reactions` | `accepted` | `REAL` | `NOT NULL` |
+| `reactions` | `metadata` | `TEXT` | `NOT NULL`; JSON snapshot |
+| `reactions` | `processed` | `INTEGER` | `DEFAULT 0`; Boolean flag |
+| `requests` | `sequence` | `INTEGER` | `PRIMARY KEY AUTOINCREMENT` |
+| `requests` | `id` | `TEXT` | `UNIQUE NOT NULL` |
+| `requests` | `listener` | `TEXT` | `NOT NULL` |
+| `requests` | `query` | `TEXT` | `NOT NULL` |
+| `requests` | `mode` | `TEXT` | `NOT NULL` |
+| `requests` | `response` | `TEXT` | `NOT NULL` |
+| `requests` | `track_id` | `TEXT` | Nullable; foreign key → `tracks(id)` |
+| `requests` | `status` | `TEXT` | `NOT NULL` |
+| `requests` | `created` | `REAL` | `NOT NULL` |
+| `requests` | `play_id` | `TEXT` | Nullable |
+| `requests` | `suggestions` | `TEXT` | `NOT NULL DEFAULT '[]'`; JSON |
+| `requests` | `sources` | `TEXT` | `NOT NULL DEFAULT '[]'`; JSON |
+| `requests` | `engine` | `TEXT` | `NOT NULL DEFAULT 'basic'` |
+| `requests` | `requested_genre` | `TEXT` | `NOT NULL DEFAULT ''` |
+| `jobs` | `id` | `TEXT` | `PRIMARY KEY` |
+| `jobs` | `body` | `TEXT` | `NOT NULL`; JSON plan/progress |
+| `jobs` | `done` | `INTEGER` | `DEFAULT 0`; Boolean flag |
 
 `outbox` is the dispatch and completion ledger. `jobs` stores consumer execution
 plans and progress using the same application job ID. Each accepted emoji is a
@@ -308,32 +281,21 @@ of the public UUID in `requests.id`.
 
 ### Conversation and retrieval state
 
-```sql
-CREATE TABLE conversations (
-    listener TEXT PRIMARY KEY,
-    genres TEXT NOT NULL
-);
-
-CREATE TABLE rag_embeddings (
-    track_id TEXT PRIMARY KEY,
-    model TEXT NOT NULL,
-    digest TEXT NOT NULL,
-    vector TEXT NOT NULL
-);
-
-CREATE TABLE rag_pending (
-    listener TEXT PRIMARY KEY,
-    genres TEXT NOT NULL,
-    track_ids TEXT NOT NULL
-);
-
-CREATE TABLE rag_turns (
-    id TEXT PRIMARY KEY,
-    listener TEXT NOT NULL,
-    created REAL NOT NULL,
-    busy INTEGER NOT NULL DEFAULT 1
-);
-```
+| Table | Column | Type | Constraints/default |
+| --- | --- | --- | --- |
+| `conversations` | `listener` | `TEXT` | `PRIMARY KEY` |
+| `conversations` | `genres` | `TEXT` | `NOT NULL`; JSON |
+| `rag_embeddings` | `track_id` | `TEXT` | `PRIMARY KEY` |
+| `rag_embeddings` | `model` | `TEXT` | `NOT NULL` |
+| `rag_embeddings` | `digest` | `TEXT` | `NOT NULL` |
+| `rag_embeddings` | `vector` | `TEXT` | `NOT NULL`; serialized vector |
+| `rag_pending` | `listener` | `TEXT` | `PRIMARY KEY` |
+| `rag_pending` | `genres` | `TEXT` | `NOT NULL`; JSON |
+| `rag_pending` | `track_ids` | `TEXT` | `NOT NULL`; JSON |
+| `rag_turns` | `id` | `TEXT` | `PRIMARY KEY` |
+| `rag_turns` | `listener` | `TEXT` | `NOT NULL` |
+| `rag_turns` | `created` | `REAL` | `NOT NULL` |
+| `rag_turns` | `busy` | `INTEGER` | `NOT NULL DEFAULT 1`; Boolean flag |
 
 `conversations` preserves per-listener conversational genre context.
 `rag_embeddings` caches serialized catalog vectors. `rag_pending` records choices
@@ -341,18 +303,16 @@ awaiting confirmation, while `rag_turns` supports chat concurrency and rate trac
 
 ### Announcements
 
-```sql
-CREATE TABLE announcements (
-    id TEXT PRIMARY KEY,
-    track_id TEXT NOT NULL,
-    script TEXT NOT NULL,
-    details TEXT NOT NULL,
-    path TEXT NOT NULL,
-    duration REAL NOT NULL,
-    created REAL NOT NULL,
-    voice TEXT NOT NULL
-);
-```
+| Column | Type | Constraints/default |
+| --- | --- | --- |
+| `id` | `TEXT` | `PRIMARY KEY` |
+| `track_id` | `TEXT` | `NOT NULL` |
+| `script` | `TEXT` | `NOT NULL` |
+| `details` | `TEXT` | `NOT NULL`; JSON evidence/details |
+| `path` | `TEXT` | `NOT NULL` |
+| `duration` | `REAL` | `NOT NULL` |
+| `created` | `REAL` | `NOT NULL` |
+| `voice` | `TEXT` | `NOT NULL` |
 
 An announcement row contains the validated script, supporting details, cached audio
 path, duration and voice. The two references on `tracks` distinguish normal and
@@ -360,46 +320,35 @@ requested-play introductions.
 
 ### Source discovery and crawler state
 
-```sql
-CREATE TABLE source_hosts (
-    hostname TEXT PRIMARY KEY,
-    provider TEXT NOT NULL,
-    role TEXT NOT NULL,
-    status TEXT NOT NULL,
-    discovered_from TEXT,
-    notes TEXT NOT NULL DEFAULT '',
-    first_seen REAL NOT NULL,
-    last_seen REAL NOT NULL,
-    tracks_downloaded INTEGER NOT NULL DEFAULT 0
-);
-
-CREATE TABLE host_downloads (
-    track_id TEXT PRIMARY KEY,
-    source_host TEXT NOT NULL,
-    media_host TEXT,
-    completed REAL NOT NULL
-);
-
-CREATE TABLE crawl_frontier (
-    url TEXT PRIMARY KEY,
-    provider TEXT NOT NULL,
-    genre TEXT,
-    depth INTEGER NOT NULL DEFAULT 0,
-    discovered_from TEXT,
-    next_attempt REAL NOT NULL DEFAULT 0,
-    status TEXT NOT NULL DEFAULT 'pending',
-    error TEXT
-);
-
-CREATE TABLE crawl_runs (
-    id TEXT PRIMARY KEY,
-    started REAL NOT NULL,
-    finished REAL,
-    pages INTEGER NOT NULL DEFAULT 0,
-    tracks INTEGER NOT NULL DEFAULT 0,
-    errors INTEGER NOT NULL DEFAULT 0
-);
-```
+| Table | Column | Type | Constraints/default |
+| --- | --- | --- | --- |
+| `source_hosts` | `hostname` | `TEXT` | `PRIMARY KEY` |
+| `source_hosts` | `provider` | `TEXT` | `NOT NULL` |
+| `source_hosts` | `role` | `TEXT` | `NOT NULL` |
+| `source_hosts` | `status` | `TEXT` | `NOT NULL` |
+| `source_hosts` | `discovered_from` | `TEXT` | Nullable |
+| `source_hosts` | `notes` | `TEXT` | `NOT NULL DEFAULT ''` |
+| `source_hosts` | `first_seen` | `REAL` | `NOT NULL` |
+| `source_hosts` | `last_seen` | `REAL` | `NOT NULL` |
+| `source_hosts` | `tracks_downloaded` | `INTEGER` | `NOT NULL DEFAULT 0` |
+| `host_downloads` | `track_id` | `TEXT` | `PRIMARY KEY` |
+| `host_downloads` | `source_host` | `TEXT` | `NOT NULL` |
+| `host_downloads` | `media_host` | `TEXT` | Nullable |
+| `host_downloads` | `completed` | `REAL` | `NOT NULL` |
+| `crawl_frontier` | `url` | `TEXT` | `PRIMARY KEY` |
+| `crawl_frontier` | `provider` | `TEXT` | `NOT NULL` |
+| `crawl_frontier` | `genre` | `TEXT` | Nullable |
+| `crawl_frontier` | `depth` | `INTEGER` | `NOT NULL DEFAULT 0` |
+| `crawl_frontier` | `discovered_from` | `TEXT` | Nullable |
+| `crawl_frontier` | `next_attempt` | `REAL` | `NOT NULL DEFAULT 0` |
+| `crawl_frontier` | `status` | `TEXT` | `NOT NULL DEFAULT 'pending'` |
+| `crawl_frontier` | `error` | `TEXT` | Nullable |
+| `crawl_runs` | `id` | `TEXT` | `PRIMARY KEY` |
+| `crawl_runs` | `started` | `REAL` | `NOT NULL` |
+| `crawl_runs` | `finished` | `REAL` | Nullable |
+| `crawl_runs` | `pages` | `INTEGER` | `NOT NULL DEFAULT 0` |
+| `crawl_runs` | `tracks` | `INTEGER` | `NOT NULL DEFAULT 0` |
+| `crawl_runs` | `errors` | `INTEGER` | `NOT NULL DEFAULT 0` |
 
 These are the full schemas for the four tables summarized under “Dynamic source
 crawler and host repository.” `host_downloads` is a per-track ledger, while
@@ -407,63 +356,47 @@ crawler and host repository.” `host_downloads` is a per-track ledger, while
 
 ### Stored media and generated visuals
 
-```sql
-CREATE TABLE media_objects (
-    object_key TEXT PRIMARY KEY,
-    track_id TEXT NOT NULL,
-    kind TEXT NOT NULL,
-    path TEXT NOT NULL,
-    mime TEXT NOT NULL,
-    checked REAL
-);
-
-CREATE TABLE track_visuals (
-    track_id TEXT PRIMARY KEY,
-    status TEXT NOT NULL,
-    created REAL NOT NULL,
-    submitted REAL,
-    completed REAL,
-    provider_id TEXT,
-    artwork_source TEXT,
-    artwork_key TEXT,
-    video_key TEXT,
-    error TEXT
-);
-```
+| Table | Column | Type | Constraints/default |
+| --- | --- | --- | --- |
+| `media_objects` | `object_key` | `TEXT` | `PRIMARY KEY` |
+| `media_objects` | `track_id` | `TEXT` | `NOT NULL` |
+| `media_objects` | `kind` | `TEXT` | `NOT NULL` |
+| `media_objects` | `path` | `TEXT` | `NOT NULL` |
+| `media_objects` | `mime` | `TEXT` | `NOT NULL` |
+| `media_objects` | `checked` | `REAL` | Nullable |
+| `track_visuals` | `track_id` | `TEXT` | `PRIMARY KEY` |
+| `track_visuals` | `status` | `TEXT` | `NOT NULL` |
+| `track_visuals` | `created` | `REAL` | `NOT NULL` |
+| `track_visuals` | `submitted` | `REAL` | Nullable |
+| `track_visuals` | `completed` | `REAL` | Nullable |
+| `track_visuals` | `provider_id` | `TEXT` | Nullable |
+| `track_visuals` | `artwork_source` | `TEXT` | Nullable |
+| `track_visuals` | `artwork_key` | `TEXT` | Nullable |
+| `track_visuals` | `video_key` | `TEXT` | Nullable |
+| `track_visuals` | `error` | `TEXT` | Nullable |
 
 `media_objects` is the local/S3 object manifest. `track_visuals` tracks one visual
 generation lifecycle per track, including provider submission and cached keys.
 
 ### Application settings
 
-```sql
-CREATE TABLE settings (
-    key TEXT PRIMARY KEY,
-    value TEXT NOT NULL
-);
-```
+| Column | Type | Constraints/default |
+| --- | --- | --- |
+| `key` | `TEXT` | `PRIMARY KEY` |
+| `value` | `TEXT` | `NOT NULL` |
 
 This key/value table contains durable station coordination state and feature latches.
 It is distinct from the telemetry observer's private `settings` table below.
 
 ### Application indexes
 
-```sql
-CREATE INDEX personal_download_time
-    ON personal_downloads(created);
-
-CREATE INDEX request_pending
-    ON requests(status, sequence);
-
-CREATE INDEX reaction_play
-    ON reactions(play_id, processed);
-
-CREATE INDEX reaction_listener
-    ON reactions(listener, accepted);
-
-CREATE INDEX play_time
-    ON plays(ends);
-```
+| Index | Table | Ordered columns | Unique |
+| --- | --- | --- | --- |
+| `personal_download_time` | `personal_downloads` | `created` | No |
+| `request_pending` | `requests` | `status`, `sequence` | No |
+| `reaction_play` | `reactions` | `play_id`, `processed` | No |
+| `reaction_listener` | `reactions` | `listener`, `accepted` | No |
+| `play_time` | `plays` | `ends` | No |
 
 Primary-key and unique declarations also create SQLite-managed indexes.
 
@@ -471,17 +404,12 @@ Primary-key and unique declarations also create SQLite-managed indexes.
 
 The observer uses a separate `/telemetry/observer.sqlite`, not `radio.db`:
 
-```sql
-CREATE TABLE settings (
-    key TEXT PRIMARY KEY,
-    value TEXT
-);
-
-CREATE TABLE seen (
-    id TEXT PRIMARY KEY,
-    created REAL
-);
-```
+| Table | Column | Type | Constraints/default |
+| --- | --- | --- | --- |
+| `settings` | `key` | `TEXT` | `PRIMARY KEY` |
+| `settings` | `value` | `TEXT` | Nullable |
+| `seen` | `id` | `TEXT` | `PRIMARY KEY` |
+| `seen` | `created` | `REAL` | Nullable |
 
 Observer `settings` records its initial scan time and hashes of selected environment
 configuration. `seen` stores deterministic lifecycle keys so the two-second polling

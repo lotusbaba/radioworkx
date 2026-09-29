@@ -21,6 +21,7 @@ function showStatus(s){
   $('chat-engine').textContent=s.chat_engine==='rag'?'AI music chat · grounded in the station catalog':'Basic catalog search';
   $('genre').textContent=m?.genre || 'OPEN FREQUENCY';
   $('title').textContent=m?.title || 'Good things are on the way.';
+  const saveTrack=m?.id;if($('track-save').dataset.track!==String(saveTrack)){$('track-save').dataset.track=String(saveTrack);$('track-save').replaceChildren(...(saveTrack?[Music.actions({id:saveTrack})]:[]));}
   $('artist').textContent=m?.artists.join(' & ') || 'Your next discovery starts here.';
   $('album').textContent=m?.album || (s.demo?'Preparing a demo transmission':'Add authorized audio to bring the station to life.');
   if(m?.artist_pages){$('artist').replaceChildren();m.artist_pages.forEach((artist,i)=>{if(i)$('artist').append(document.createTextNode(' & '));const a=node('a',artist.name);a.href='/artists/'+artist.id;$('artist').append(a);});}
@@ -130,8 +131,9 @@ function tick(){
   $('elapsed').textContent=time(elapsed);$('duration').textContent=time(p.ends-p.starts);$('progress').style.width=`${Math.max(0,elapsed/(p.ends-p.starts)*100)}%`;
 }
 setInterval(tick,1000);
-let reconnectTimer=null,reconnectAttempt=0,playbackEpoch=0;
-function stop(){window.Activity?.emit('live.tune_out',{mode:'live'});playbackEpoch++;clearTimeout(reconnectTimer);reconnectTimer=null;reconnectAttempt=0;tuned=false;audio.pause();audio.removeAttribute('src');audio.load();document.body.classList.remove('playing');$('play-icon').textContent='▶';$('play-label').textContent='Tune in';$('audio-status').textContent='Live together, wherever you are.';}
+let reconnectTimer=null,reconnectAttempt=0,playbackEpoch=0,stallTimer=null;
+function clearStall(){clearTimeout(stallTimer);stallTimer=null;}
+function stop(){clearStall();window.Activity?.emit('live.tune_out',{mode:'live'});playbackEpoch++;clearTimeout(reconnectTimer);reconnectTimer=null;reconnectAttempt=0;tuned=false;audio.pause();audio.removeAttribute('src');audio.load();document.body.classList.remove('playing');$('play-icon').textContent='▶';$('play-label').textContent='Tune in';$('audio-status').textContent='Live together, wherever you are.';}
 async function startPlayback(automatic=false){
   if(tuned)return;
   autoplayBlocked=false;
@@ -174,7 +176,7 @@ function syncVisual(s){
   if(visual?.artwork_url){if(art.getAttribute('src')!==visual.artwork_url)art.src=visual.artwork_url;art.hidden=false;}else{art.hidden=true;art.removeAttribute('src');}
   video.hidden=!url||videoFailed;document.querySelector('.art').classList.toggle('has-media',!!url||!!visual?.artwork_url);
   $('visual-label').hidden=!url;$('motion-toggle').hidden=!url;
-  const labels={queued:'Artwork video is queued. Music plays while it is prepared.',submitting:'Preparing the artwork video…',generating:'Generating the artwork video… It will appear here when ready.',failed:'Video generation was unavailable for this artwork. Showing the cover instead.',unavailable:'No usable artwork video is available for this track.',submission_unknown:'Artwork video is awaiting review.'};
+  const labels={artwork_pending:'Fetching the track artwork…',artwork_ready:'Original release artwork.',artwork_unavailable:'Artwork is unavailable for this release.',queued:'Artwork video is queued. Music plays while it is prepared.',submitting:'Preparing the artwork video…',generating:'Generating the artwork video… It will appear here when ready.',failed:'Video generation was unavailable for this artwork. Showing the cover instead.',unavailable:'No usable artwork video is available for this track.',submission_unknown:'Artwork video is awaiting review.'};
   $('visual-status').textContent=videoFailed?'The artwork video could not load. Tap Retry video.':url?(motionPaused?'Artwork motion is paused. Tap Play motion to watch.':'10-second artwork video · loops throughout the track.'):labels[visual?.status]||(s.play||s.announcement?'Artwork video has not been prepared yet.':'');
   $('motion-toggle').textContent=videoFailed?'Retry video':motionPaused?'Play motion':'Pause motion';
   $('motion-toggle').setAttribute('aria-label',videoFailed?'Retry artwork video':motionPaused?'Play artwork motion':'Pause artwork motion');
@@ -184,9 +186,26 @@ $('motion-toggle').onclick=()=>{if(videoFailed){videoFailed=false;motionPaused=f
 $('track-video').addEventListener('error',()=>{if(visualURL){videoFailed=true;if(state)syncVisual(state);}});
 reduceMotion.addEventListener('change',()=>{motionPaused=reduceMotion.matches;if(state)syncVisual(state);});
 document.addEventListener('visibilitychange',()=>{if(state)syncVisual(state);});
-audio.onplaying=()=>{clearTimeout(reconnectTimer);reconnectTimer=null;reconnectAttempt=0;enableAnalyser();document.body.classList.add('playing');$('audio-status').textContent='You’re on the live frequency.';};
-audio.onwaiting=()=>{if(tuned)$('audio-status').textContent='Waiting for the live signal…';};
-function reconnectAudio(){window.Activity?.emit('playback.reconnect',{mode:'live'});
+audio.onplaying=()=>{clearStall();clearTimeout(reconnectTimer);reconnectTimer=null;reconnectAttempt=0;enableAnalyser();document.body.classList.add('playing');$('audio-status').textContent='You’re on the live frequency.';};
+function waitForSignal(){
+  if(!tuned)return;
+  $('audio-status').textContent='Waiting for the live signal…';
+  if(stallTimer!==null)return;
+  const epoch=playbackEpoch,position=audio.currentTime;
+  stallTimer=setTimeout(()=>{
+    stallTimer=null;
+    if(!tuned||epoch!==playbackEpoch)return;
+    if(audio.currentTime>position+.05){if(audio.readyState<3)waitForSignal();return;}
+    // A stalled network read can occur while the closing words are buffered.
+    // Let them play; only replace a connection that has truly stopped advancing.
+    for(let i=0;i<audio.buffered.length;i++){
+      if(audio.buffered.start(i)<=audio.currentTime && audio.buffered.end(i)>audio.currentTime+.1){waitForSignal();return;}
+    }
+    reconnectAudio();
+  },15000);
+}
+audio.onwaiting=waitForSignal;
+function reconnectAudio(){clearStall();window.Activity?.emit('playback.reconnect',{mode:'live'});
   if(!tuned||reconnectTimer)return;
   document.body.classList.remove('playing');
   $('audio-status').textContent='Signal interrupted. Reconnecting to the live frequency…';
@@ -201,7 +220,7 @@ function reconnectAudio(){window.Activity?.emit('playback.reconnect',{mode:'live
 }
 audio.onerror=reconnectAudio;
 audio.onended=reconnectAudio;
-audio.onstalled=reconnectAudio;
+audio.onstalled=waitForSignal;
 $('volume').oninput=(e)=>{audio.volume=Number(e.target.value);};
 const events=new EventSource('/api/events');
 events.addEventListener('snapshot',e=>{try{showStatus(JSON.parse(e.data));}catch(err){console.error(err);}});

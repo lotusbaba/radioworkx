@@ -708,3 +708,108 @@ port 8000 may be unavailable because the api slot is intentionally stopped.
 Public page and live MP3 subsequently returned HTTP 200, with audio bytes received.
 Station status reported On air. The first status request timed out during startup;
 a later request succeeded in 9.4 seconds while services were warming up.
+
+## Listener accounts, likes, and playlists (2026-09-28)
+
+Added email/password registration and sign-in at `/my-music`, with private persistent
+liked tracks and personal playlists. Station, artist, and album track controls expose
+Like and + Playlist; the save dialog can create a playlist. My music supports playlist
+creation, rename/delete, track removal, Play all, sequential automatic advance, native
+pause/seek/volume, Next track, and Stop. Saved unavailable tracks remain visible but
+are excluded when building a playback queue. Preparation failures leave an explicit
+message and allow Next track. Navigation still ends personal playback.
+
+`app/accounts.py` contains account/collection APIs. Additive tables are users,
+user_sessions, account_attempts, user_likes, user_playlists, user_playlist_tracks.
+Account IDs and collections are separate from anonymous listener identity, live emoji
+reactions, and station scheduling/history. Passwords use salted PBKDF2-SHA256 with
+600,000 iterations. Session tokens are random, stored only as SHA-256 digests, expire
+in 30 days, and are revoked on sign-out. Cookies are HTTP-only and SameSite Strict;
+production COOKIE_SECURE remains enabled. Mutations require a custom same-origin
+header and reject cross-site requests. Database-backed email/IP/global attempt limits
+apply to registration and login. Existing telemetry does not capture credential bodies.
+Email verification, password recovery emails, and a mail provider are not configured:
+email is currently the sign-in identifier. Do not claim email ownership is verified.
+
+Full suite: 151 passed. `scripts/accounts_smoke.py` uses a temporary database/catalog,
+synthetic audio and headless Chrome to verify registration, likes, playlist creation,
+adding/removing tracks, rename, actual audio and automatic advance, sign-in persistence,
+and desktop/mobile layout with no JS errors. It creates no production accounts.
+The API/frontend deployment uses the existing rolling controller; station and workers
+remain running with their existing images. No playback history or volumes are reset.
+
+Deployment completed to api-next, image `c5315009f2d0ac54c578a5738419771e4daa95210e8fb12bb5c2afaf6fdae6a1`;
+previous API drained and stopped normally. Public `/health` returns OK and `/my-music`
+returns 200. Production secure-cookie setting was checked and is enabled.
+Public library browser verification passed navigation, actual cached audio, seeking,
+and mobile layout with no JS errors after increasing waits in a temporary test copy.
+Initial production smoke runs exceeded the default waits. A station browser check
+with longer snapshot waits passed live audio, pagination/persistence and stats-filter
+steps, then timed out at its separate final `/api/status` fetch (30 seconds), so the
+full station smoke is NOT claimed as passed. A direct status request completed in
+15.8 seconds with On air, an active play and ten preview tracks; another exceeded
+20 seconds. API CPU was about 125% during checks. Catalog count was 6,903 tracks and
+history 6,131 plays. Slow production status/catalog responses remain an unresolved
+performance observation; no station scheduling/history changes were made to address
+this during the account feature work. Existing user-authored untracked docs/test spec
+were left untouched. Feature changes remain uncommitted in the workspace.
+
+## Announcer tail preservation (2026-09-28)
+
+User reported missing closing words at the intro-to-music transition. Verified the
+running station transmits the full FFmpeg stdout and waits for process completion;
+there is no duration-based speech cutoff in station code. Found two loss paths in
+API/player: after each batch the API jumped its Redis cursor to the newest chunk
+when timestamp lag exceeded three seconds, discarding retained speech; the browser
+also replaced its audio source immediately on a `stalled` event, discarding buffered
+audio even when playback could continue.
+
+`app/live_audio.py` now anchors each new connection once at the current live edge
+and forwards all retained chunks in order, with larger read batches. It does not
+seek ahead on transient lag. Redis's existing bounded retention remains the limit;
+this cannot recover audio already trimmed after a long outage. The player keeps its
+source on waiting/stalled, allows buffered speech to finish, and uses a 15-second
+watchdog to reconnect only after progress stops and playable buffers are empty.
+Error/end recovery and Tune out cancellation remain. No announcer, speech-generation,
+station-worker, history, or media changes were needed. Existing browser tabs need
+one refresh to load the updated JavaScript.
+
+153 tests passed, including stream ordering/idle cursor/resource cleanup regressions.
+`scripts/transition_smoke.py` verifies in isolated Chrome that transient stalls do
+not restart progressing audio, buffered speech survives the watchdog, empty stalled
+connections recover, and Tune out cancels timers; no JS errors. API image
+`10e430ea0d4c8d6a2d483fb025b25d5d012d4252f24890e5fc61fa7a8c2adcdc`
+was rolled to api; public health returned OK. Station remains on its existing image.
+
+Post-deployment real-transition verification succeeded. A temporary read-only capture
+compared station Redis bytes, HTTP-delivered MP3 bytes, and the cached introduction
+remuxed with the station's exact FFmpeg flags. Over 82 seconds, all 1,221,945 delivered
+bytes matched one contiguous source segment, and the complete cached introduction
+appeared intact in both source and HTTP audio before the following music. No capture
+errors. The initial diagnostic attempt lacked a cookie usable over internal HTTP;
+it produced no HTTP audio and was not treated as evidence. The corrected capture
+used an ephemeral signed anonymous listener session and retained audio only in memory.
+
+## Still artwork while videos are paused (2026-09-29)
+
+Missing artwork was confirmed: the then-current track had no track_visuals row,
+while VIDEOS_ENABLED was 0. Both visual scheduling and queue consumption previously
+stopped at that flag, so still covers were only fetched as a prerequisite to video
+generation. Existing 28 cached covers could display, but newer tracks had none.
+
+Added an independent artwork loop inside the visuals worker. It fetches one missing
+announced/current/queued cover per pass, with ten-minute retry backoff, and stores
+covers locally and in S3 without any OpenAI request. The helper uses a per-track file
+lock and atomic image replacement so it can coexist with enabled video processing.
+Artwork-only rows can later be promoted to video jobs by the scheduler, without
+changing existing provider IDs or ready/failed video state. Artwork downloads now
+follow bounded, provider-validated redirects. Video generation remains paused.
+
+Visuals and dispatcher were rebuilt; API/frontend rolled to api-next, image
+`9afd2b91da7b638ab0cd3bee6e207afe6396565eaa33636d682e7c7087ab5641`.
+Station was not restarted. Full suite 156 passed. Public browser verification via
+`scripts/artwork_smoke.py` confirmed an HTTP 200 image decoded at 1280×720 and rendered
+on desktop/mobile for “September 2015 Instrumental”, with no JS errors. Mobile
+artwork screenshot was visually inspected. Current worker VIDEOS_ENABLED=0 was
+verified; public visual status was artwork_ready with video_url null. Releases
+without usable source artwork still show the existing station fallback.

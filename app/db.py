@@ -5,6 +5,16 @@ from contextlib import contextmanager
 from app.config import DATA
 
 SCHEMA = """
+CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, email TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL, created REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS user_sessions (digest TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, expires REAL NOT NULL);
+CREATE INDEX IF NOT EXISTS user_session_expiry ON user_sessions(expires);
+CREATE TABLE IF NOT EXISTS account_attempts (bucket TEXT NOT NULL, created REAL NOT NULL);
+CREATE INDEX IF NOT EXISTS account_attempt_bucket ON account_attempts(bucket,created);
+CREATE TABLE IF NOT EXISTS user_likes (user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, track_id TEXT NOT NULL REFERENCES tracks(id), created REAL NOT NULL, PRIMARY KEY(user_id,track_id));
+CREATE TABLE IF NOT EXISTS user_playlists (id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, name TEXT NOT NULL, created REAL NOT NULL);
+CREATE INDEX IF NOT EXISTS user_playlist_owner ON user_playlists(user_id);
+CREATE TABLE IF NOT EXISTS user_playlist_tracks (playlist_id TEXT NOT NULL REFERENCES user_playlists(id) ON DELETE CASCADE, track_id TEXT NOT NULL REFERENCES tracks(id), position INTEGER NOT NULL, PRIMARY KEY(playlist_id,track_id));
+
 CREATE TABLE IF NOT EXISTS personal_downloads (listener TEXT NOT NULL, created REAL NOT NULL);
 CREATE INDEX IF NOT EXISTS personal_download_time ON personal_downloads(created);
 CREATE TABLE IF NOT EXISTS failed_downloads (

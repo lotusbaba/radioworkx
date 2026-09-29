@@ -114,3 +114,66 @@ def test_disabled_flag_prevents_new_submission(metadata,monkeypatch):
     seed(metadata)
     monkeypatch.setenv('VIDEOS_ENABLED','0')
     with pytest.raises(RuntimeError,match='paused'):visuals.process({'track_id':metadata['id']})
+
+
+def test_still_artwork_works_without_video_or_api_key(metadata,playing,monkeypatch):
+    import time
+    seed(metadata)
+    with db.transaction() as c:c.execute('DELETE FROM track_visuals')
+    playing(now=time.time()-1)
+    monkeypatch.setenv('VIDEOS_ENABLED','0');monkeypatch.delenv('OPENAI_API_KEY',raising=False)
+    fetched=[]
+    def cover(meta,path):
+        fetched.append(meta['id']);path.write_bytes(b'cover');return 'https://f4.bcbits.com/img/cover.jpg'
+    monkeypatch.setattr(visuals,'artwork',cover)
+    monkeypatch.setattr(object_store,'put',lambda tid,kind,path:object_store.key(tid,kind))
+    assert visuals.prepare_artwork_once()==metadata['id']
+    assert visuals.prepare_artwork_once() is None
+    assert fetched==[metadata['id']]
+    with db.connect() as c:
+        result=visuals.public(c,metadata['id'])
+        assert result['artwork_url'] and result['video_url'] is None
+        assert result['status']=='artwork_ready'
+        assert c.execute('SELECT COUNT(*) FROM outbox').fetchone()[0]==0
+    # If videos are later explicitly enabled, artwork-only rows remain schedulable.
+    monkeypatch.setenv('VIDEOS_ENABLED','1')
+    with db.transaction() as c:
+        visuals.schedule(c);visuals.schedule(c)
+        assert c.execute('SELECT COUNT(*) FROM outbox').fetchone()[0]==1
+        assert c.execute('SELECT status FROM track_visuals').fetchone()[0]=='queued'
+
+
+def test_artwork_failure_backs_off_and_preserves_video_state(metadata,playing,monkeypatch):
+    import time
+    import pytest
+    seed(metadata,'failed');playing(now=time.time()-1)
+    calls=[]
+    def unavailable(*args):calls.append(1);raise ValueError('No artwork')
+    monkeypatch.setattr(visuals,'artwork',unavailable)
+    with pytest.raises(ValueError):visuals.prepare_artwork_once()
+    assert visuals.prepare_artwork_once() is None
+    assert calls==[1]
+    with db.connect() as c:assert c.execute('SELECT status FROM track_visuals').fetchone()[0]=='failed'
+
+
+def test_artwork_follows_only_validated_bounded_redirects(monkeypatch):
+    import httpx
+    import pytest
+    seen=[]
+    def stream(method,url,**kwargs):
+        seen.append(url)
+        return httpx.Response(302,headers={'location':'https://internal.example/private'},request=httpx.Request(method,url))
+    class Context:
+        def __init__(self,response):self.response=response
+        def __enter__(self):return self.response
+        def __exit__(self,*args):self.response.close()
+    monkeypatch.setattr(visuals.httpx,'stream',lambda *a,**k:Context(stream(*a,**k)))
+    with pytest.raises(ValueError,match='Unsupported provider host'):
+        visuals.bounded_get('https://archive.org/services/img/example',100)
+    assert len(seen)==1
+    def archive_redirect(method,url,**kwargs):
+        seen.append(url)
+        return httpx.Response(302,headers={'location':'https://ia800100.us.archive.org/art.jpg'},request=httpx.Request(method,url)) if url.startswith('https://archive.org/') else httpx.Response(200,content=b'artwork',request=httpx.Request(method,url))
+    monkeypatch.setattr(visuals.httpx,'stream',lambda *a,**k:Context(archive_redirect(*a,**k)))
+    assert visuals.bounded_get('https://archive.org/services/img/example',100)==b'artwork'
+    with pytest.raises(ValueError,match='too large'):visuals.bounded_get('https://archive.org/services/img/example',2)

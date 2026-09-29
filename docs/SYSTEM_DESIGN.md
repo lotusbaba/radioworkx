@@ -161,7 +161,7 @@ flowchart LR
 
 **Idempotence:** A stable event ID deduplicates retries of one submission, while new submissions are allowed after a one-second session cooldown; Redis atomically remembers projected event IDs and writes the ranking and reaction event together. Job plans and each successful enqueue are persisted. SSE retains approximately 2,000 events and sends fresh state snapshots, so reconnecting listeners converge even if their old cursor falls outside retained history. Event IDs are retained for projection deduplication; plan archival/compaction for long-running deployments.
 
-**Audio:** the station runs one paced FFmpeg process at a time. It publishes bounded MP3 chunks through a separate Redis stream; `/api/live` starts each connection at the live edge. Slow connections shed backlog rather than becoming an archive. Browser buffering means listeners can differ by a few seconds; reaction acceptance uses the server’s current play and server timestamps. Tune out disconnects; tuning back in rejoins live. Browser autoplay requires a user click.
+**Audio:** the station runs one paced FFmpeg process at a time. It publishes bounded MP3 chunks through a separate Redis stream; `/api/live` starts each connection at the live edge. Existing connections drain retained chunks in order, including the last words of an introduction. They do not seek forward after a transient delay; Redis retention still bounds the available buffer, so audio already trimmed during a long disconnection cannot be recovered. Browser buffering means listeners can differ by a few seconds; reaction acceptance uses the server’s current play and server timestamps. Tune out disconnects; tuning back in rejoins live. Browser autoplay requires a user click.
 
 **Timing:** both acceptance and threshold processing must occur before the play ends. A delayed reaction still contributes to the genre demand ranking, but it cannot trigger a follow-up after the current track ends. No forced skipping or interruption occurs on a threshold crossing.
 
@@ -934,6 +934,12 @@ existing videos stay reusable and queued jobs remain pending. Apply the flag wit
 `docker compose up -d dispatcher visuals`. Set it back to `1` and run that command
 to resume. An already submitted OpenAI job may finish remotely while the worker is
 paused; its saved job ID is used on resumption. Track object-storage sync continues.
+Still artwork is fetched independently by the visuals worker, including while videos
+are paused and without an OpenAI key. It prioritizes the announced/current track and
+prefetches up to two queued tracks, caches each cover locally and in S3, and backs off
+failed artwork attempts for ten minutes. Provider redirects are validated at every
+hop. Artwork-only records remain eligible for video scheduling if that is enabled
+later. Fetching still artwork does not submit video-generation requests.
 `VIDEO_MODEL` defaults to `sora-2`; `MEDIA_BUCKET` defaults to `radioworkx-media`.
 Artwork is sent to OpenAI for generation. Video generation is a paid API operation,
 once for each newly scheduled track, independent of music download counts.
@@ -1568,7 +1574,9 @@ which upstream actually answers before stopping either container.
 
 Nginx forwards audio/SSE incrementally with response buffering disabled. Existing
 streams remain on the old Nginx workers until they finish or the drain deadline.
-The browser reconnects live audio on error, end, or stall with bounded backoff;
+The browser reconnects live audio on error or end with bounded backoff. A stall
+keeps the current audio source and buffered speech; a 15-second watchdog reconnects
+only when playback has stopped advancing and no playable audio remains buffered;
 SSE reconnects through EventSource. This is not a promise of gapless audio at the
 drain deadline. Pages loaded before the reconnection change need one refresh to
 receive the updated player. Tuning out cancels scheduled reconnection attempts.

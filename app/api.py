@@ -37,6 +37,8 @@ from app.admin import router as admin_router, authorize
 app.include_router(admin_router)
 from app.library import router as library_router
 app.include_router(library_router)
+from app.accounts import router as accounts_router
+app.include_router(accounts_router)
 from app.telemetry_api import router as activity_router, ActivityMiddleware
 app.include_router(activity_router)
 from app.activity_admin import router as activity_admin_router
@@ -239,26 +241,8 @@ async def events(request: Request):
 @app.get('/api/live')
 async def live(request: Request):
     listener(request)
-    async def audio():
-        client = aioredis.from_url(REDIS_URL)
-        cursor = '$'
-        try:
-            # Start at the live edge. Only the server may choose tracks or their position.
-            while not await request.is_disconnected():
-                rows = await client.xread({'radio:audio':cursor},count=10,block=10000)
-                if not rows:
-                    continue
-                for _,messages in rows:
-                    for id,fields in messages:
-                        cursor = id
-                        yield fields[b'chunk']
-                # Drop backlog for a slow connection instead of becoming an archive.
-                latest = await client.xrevrange('radio:audio',count=1)
-                if latest and int(latest[0][0].split(b'-')[0])-int(cursor.split(b'-')[0]) > 3000:
-                    cursor = latest[0][0]
-        finally:
-            await client.aclose()
-    return StreamingResponse(audio(),media_type='audio/mpeg',headers={
+    from app.live_audio import chunks
+    return StreamingResponse(chunks(request),media_type='audio/mpeg',headers={
         'Cache-Control':'no-store','X-Accel-Buffering':'no','Accept-Ranges':'none'})
 
 

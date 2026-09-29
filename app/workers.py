@@ -143,8 +143,15 @@ def main():
                     try:sync_one()
                     except Exception as error:log.error('Object storage sync: %s',type(error).__name__)
                     time.sleep(2)
-            with ThreadPoolExecutor(max_workers=2) as pool:
+            def artwork_loop():
+                from app.visuals import prepare_artwork_once
+                while True:
+                    try:prepare_artwork_once()
+                    except Exception as error:log.error('Artwork preparation: %s',type(error).__name__)
+                    time.sleep(5)
+            with ThreadPoolExecutor(max_workers=3) as pool:
                 pool.submit(storage_loop)
+                pool.submit(artwork_loop)
                 consume_forever('visuals')
             return
         if name == 'downloads':

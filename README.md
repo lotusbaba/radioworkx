@@ -11,6 +11,7 @@ The live station is currently available at [radioworkx.tail060b33.ts.net](https:
 - Accepts emoji reactions and catalog-grounded song, artist, album, genre, and mood requests.
 - Acquires only allowlisted, explicitly authorized recordings and stops permanently at 10,000 downloaded tracks.
 - Provides searchable artist and album pages with separate personal playback.
+- Supports email/password accounts, private liked tracks, and personal playlists with sequential playback at `/my-music`.
 - Uses a durable SQLite outbox and LocalStack SQS workers for reactions, downloads, crawling, and artwork processing.
 - Records privacy-limited activity in both Elasticsearch/Kibana and OpenSearch Dashboards.
 - Supports proxy-based API deployments with connection draining and rollback.
@@ -90,11 +91,20 @@ These endpoints are bound to loopback and are not public station URLs.
 
 ## Documentation
 
+- [Station audio architecture](docs/STATION_AUDIO_ARCHITECTURE.md) — Python processes and threads, FFmpeg subprocesses and stdout pipes, Redis audio chunks, API delivery, and announcement state.
 - [System design and operations](docs/SYSTEM_DESIGN.md) — full behavioral specification, architecture, APIs, deployment procedures, and observability setup.
 - [RAG chat architecture](docs/RAG_CHAT_ARCHITECTURE.md) — embeddings, hybrid retrieval, pending confirmations, structured output, validation, rate limits, and fallback behavior.
 - [Telemetry architecture explained](docs/telemetry-architecture-explained.md) — component-by-component explanation of the telemetry pipeline.
 - [Architecture sequence source](docs/current-architecture.sequence.txt) and [rendered SVG](docs/current-architecture.svg) — editable SequenceDiagram.org model and generated diagram.
 - [Session handoff](docs/SESSION_HANDOFF.md) — current operational context, recent production fixes, and live verification notes.
+
+## Listener accounts
+
+Open **My music** from the station or library navigation to register with an email address and a 12–128 character password. Like tracks or add them to playlists on the station and artist/album pages. My music supports creating, renaming, and deleting playlists, removing tracks, and Play all with automatic advance and a Next track control. Unavailable recordings are skipped when building the playback queue; preparation failures show a message and allow manually advancing. Playback stops when navigating to another page.
+
+Accounts use salted PBKDF2-SHA256 password hashes (600,000 iterations), random revocable server-side sessions with a 30-day expiry, HTTP-only same-site cookies, same-origin mutation protection, and database-backed sign-in throttling. Saved music is private to its owner. Account likes are separate from broadcast emoji reactions. Email verification and password-reset emails are not configured; registration currently uses an email address as the sign-in identifier.
+
+The additive schema is initialized by the API on startup and preserves station history and media. Run `.venv/bin/python scripts/accounts_smoke.py` for an isolated Chrome test using temporary accounts, a temporary catalog, and synthetic audio.
 
 ## Safety and data
 

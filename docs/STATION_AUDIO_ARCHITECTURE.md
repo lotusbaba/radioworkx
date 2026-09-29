@@ -14,6 +14,7 @@ investigation or diagnostic capture procedures.
 | Component | Responsibility | Execution model |
 | --- | --- | --- |
 | Station | Select tracks, transmit introductions and music, record broadcast history | Long-running Python process in the `station` container |
+| Refill calculation | Check acquisition/recovery needs when music starts | Background `station-refill` thread inside the station Python process; notifications are coalesced |
 | Announcement preparation | Prepare/cache introductions for upcoming tracks | Background `announcer-queue` thread inside the station Python process |
 | FFmpeg transmission | Read one saved audio file and output paced MP3 bytes | Child process started by station Python, inside the same container |
 | Redis | Retain a bounded stream of recently published audio chunks | Separate Redis server/container |
@@ -65,13 +66,13 @@ The main loop in [`app/station.py`](../app/station.py) controls this sequence:
    `transmit(intro['path'])`. That function starts FFmpeg, forwards its output until
    end-of-file, and waits for the subprocess to exit.
 5. Call `start_music()` to set the music's broadcast timestamps, clear announcement
-   state, and publish the track event. Check refill needs, then call
-   `transmit(music_path)` to start a new FFmpeg transmission subprocess for the song.
+   state, and publish the track event. Notify the background refill thread, then
+   immediately call `transmit(music_path)` to start a new FFmpeg transmission subprocess for the song.
 6. When transmission finishes, record the actual end, update linked requests,
    publish a track-end event, and repeat the selection loop.
 
 The same Python process selects the next track and starts FFmpeg. FFmpeg receives
-one file path; it does not query SQLite, choose songs, watch the playlist, or decide
+one file path; it does not query PostgreSQL, choose songs, watch the playlist, or decide
 what comes next. The station does not wait for every listener to finish buffering
 or listening before proceeding. Server transmission time and audible browser time
 can differ.
@@ -84,11 +85,13 @@ wait for speech generation. Selection still follows station eligibility rules.
 The normal transmission command has this shape:
 
 ```sh
-ffmpeg -v error -re -i FILE -map_metadata -1 -c:a copy \
-  -write_xing 0 -id3v2_version 0 -f mp3 pipe:1
+ffmpeg -v error -re -f mp3 -probesize 32768 -i FILE -map_metadata -1 -c:a copy \
+  -write_xing 0 -id3v2_version 0 -flush_packets 1 -f mp3 pipe:1
 ```
 
 - `-re` paces file reading approximately at the media's playback rate.
+- The input format and bounded probe match the already-normalized MP3 cache.
+- `-flush_packets 1` flushes output packets promptly to the pipe.
 - `-c:a copy` copies the existing MP3 audio rather than re-encoding it. The demo
   path instead applies gain and encodes MP3.
 - `pipe:1` directs output to standard output, connected to an operating-system pipe
@@ -158,9 +161,9 @@ creates a new connection at the live edge. Temporary stalls preserve playable
 buffered audio. The player retries an empty stream that has stopped advancing;
 error/end events also trigger bounded reconnection attempts.
 
-## SQLite records and cached announcement files
+## PostgreSQL records and cached announcement files
 
-SQLite stores metadata and broadcast state; it does not store the live audio
+PostgreSQL stores metadata and broadcast state; it does not store the live audio
 chunks. The relevant records are:
 
 | Record | Contents and purpose |
@@ -171,7 +174,7 @@ chunks. The relevant records are:
 | `settings` entry `announcement_on_air` | JSON describing the introduction currently being transmitted: broadcast ID, track metadata, written dialogue, source, start/end estimates, and voice |
 
 The station writes `announcement_on_air` before introducing a track and clears it
-when music starts. This is a setting in SQLite, **not a Redis cache key**. Its timing
+when music starts. This is a setting in PostgreSQL, **not a Redis cache key**. Its timing
 supports application status; it is not a command telling FFmpeg to truncate speech.
 
 The `script` column means the announcer's written dialogue. Cached announcement MP3

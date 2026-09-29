@@ -14,11 +14,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import fakeredis
 import uvicorn
 from playwright.sync_api import sync_playwright
+from app.testing import database
 from app import api, db, events
 
 
 def main():
-    with tempfile.TemporaryDirectory(prefix='rwx-transition-') as tmp:
+    with database(), tempfile.TemporaryDirectory(prefix='rwx-transition-') as tmp:
         db.DATA=Path(tmp);db.init();api.r=events.r=fakeredis.FakeRedis(decode_responses=True)
         snapshot=api.status()
         raw=io.BytesIO()

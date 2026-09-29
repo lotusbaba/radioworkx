@@ -41,10 +41,10 @@ def enrich(event):
     from app import db
     with db.connect() as c:
         if not tid and event['radioworkx'].get('broadcast_id'):
-            play=c.execute('SELECT track_id FROM plays WHERE id=?',(event['radioworkx']['broadcast_id'],)).fetchone()
+            play=c.execute('SELECT track_id FROM plays WHERE id=%s',(event['radioworkx']['broadcast_id'],)).fetchone()
             if play:tid=play['track_id'];event['radioworkx']['track_id']=tid
         if not tid:return
-        row=c.execute('SELECT metadata FROM tracks WHERE id=?',(tid,)).fetchone()
+        row=c.execute('SELECT metadata FROM tracks WHERE id=%s',(tid,)).fetchone()
     if row:
         m=json.loads(row['metadata']);event['radioworkx'].update(track_title=m.get('title'),artists=m.get('artists'),album=m.get('album'),album_id=m.get('album_id'),genre=m.get('genre'),provider=m.get('provider') or m.get('source_kind','catalog'))
 

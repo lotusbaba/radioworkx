@@ -6,7 +6,7 @@ from app.station import refill
 
 def add(id,meta,status='available',downloaded=None):
     with db.transaction() as c:
-        c.execute('INSERT INTO tracks(id,metadata,source,rights,status,downloaded_at) VALUES(?,?,?,?,?,?)',
+        c.execute('INSERT INTO tracks(id,metadata,source,rights,status,downloaded_at) VALUES(%s,%s,%s,%s,%s,%s)',
                   (id,json.dumps({**meta,'id':id}),'https://audio.example/'+id,'Permission',status,downloaded))
 
 def test_hard_cap_reservations_and_latch(metadata,monkeypatch):
@@ -19,7 +19,7 @@ def test_hard_cap_reservations_and_latch(metadata,monkeypatch):
     with db.transaction() as c:
         c.execute("UPDATE tracks SET downloaded_at=2,status='ready' WHERE status='downloading'")
         assert downloads.library_only(c)
-        c.execute('DELETE FROM tracks WHERE id=?',('ready',))
+        c.execute('DELETE FROM tracks WHERE id=%s',('ready',))
     with db.connect() as c:
         remaining=c.execute("SELECT id FROM tracks WHERE status='available' LIMIT 1").fetchone()[0]
     assert downloads.reserve(remaining) is None
@@ -27,9 +27,9 @@ def test_hard_cap_reservations_and_latch(metadata,monkeypatch):
 def test_refill_at_last_three_not_four(metadata,monkeypatch):
     for i in range(4):
         add(str(i),metadata,'ready',1)
-        with db.transaction() as c:c.execute('INSERT INTO playlist(track_id) VALUES(?)',(str(i),))
+        with db.transaction() as c:c.execute('INSERT INTO playlist(track_id) VALUES(%s)',(str(i),))
     assert refill(now=1000) is None
-    with db.transaction() as c:c.execute('DELETE FROM playlist WHERE track_id=?',('3',))
+    with db.transaction() as c:c.execute('DELETE FROM playlist WHERE track_id=%s',('3',))
     assert refill(now=1000)
     assert refill(now=1100) is None # outstanding batch suppresses duplicate jobs
 
@@ -38,9 +38,9 @@ def test_refill_counts_current_track(metadata,playing,monkeypatch):
     playing(now=1000)
     for i in range(3):
         add(str(i),metadata,'ready',1)
-        with db.transaction() as c:c.execute('INSERT INTO playlist(track_id) VALUES(?)',(str(i),))
+        with db.transaction() as c:c.execute('INSERT INTO playlist(track_id) VALUES(%s)',(str(i),))
     assert refill(now=1001) is None
-    with db.transaction() as c:c.execute('DELETE FROM playlist WHERE track_id=?',('2',))
+    with db.transaction() as c:c.execute('DELETE FROM playlist WHERE track_id=%s',('2',))
     assert refill(now=1001)
 
 
@@ -55,7 +55,7 @@ def test_short_playable_forecast_triggers_one_recovery(metadata,playing):
     assert id.startswith('recovery:')
     refill(now=1002)
     with db.connect() as c:
-        assert c.execute("SELECT COUNT(*) FROM outbox WHERE json_extract(body,'$.kind')='recovery'").fetchone()[0]==1
+        assert c.execute("SELECT COUNT(*) FROM outbox WHERE (body::jsonb ->> 'kind')='recovery'").fetchone()[0]==1
 
 def test_ten_genres_and_artist_boost(metadata,monkeypatch):
     monkeypatch.setattr(downloads,'DEMO',False)
@@ -111,7 +111,7 @@ def test_prefers_ten_new_downloads_over_cached(metadata,monkeypatch):
 
 def test_exact_ten_thousand_track_boundary(metadata):
     with db.transaction() as c:
-        c.executemany("INSERT INTO tracks(id,metadata,status,downloaded_at) VALUES(?,?,'ready',1)",
+        c.cursor().executemany("INSERT INTO tracks(id,metadata,status,downloaded_at) VALUES(%s,%s,'ready',1)",
                       ((f'cached-{i}',json.dumps(metadata)) for i in range(9999)))
     add('last-slot',metadata)
     add('overflow',metadata)
@@ -146,15 +146,15 @@ def test_request_fetch_clears_genre_only_on_success_and_retry_is_safe(metadata,m
 def test_recovery_triggers_with_full_but_ineligible_queue(metadata):
     with db.transaction() as c:
         for i in range(3):
-            c.execute('INSERT INTO plays(id,track_id,metadata,starts,ends) VALUES(?,?,?,?,?)',(str(i),'old',json.dumps(metadata),i*100,i*100+90))
+            c.execute('INSERT INTO plays(id,track_id,metadata,starts,ends) VALUES(%s,%s,%s,%s,%s)',(str(i),'old',json.dumps(metadata),i*100,i*100+90))
     for i in range(9):
         add(str(i),metadata,'ready',1)
-        with db.transaction() as c:c.execute('INSERT INTO playlist(track_id) VALUES(?)',(str(i),))
+        with db.transaction() as c:c.execute('INSERT INTO playlist(track_id) VALUES(%s)',(str(i),))
     id=refill(now=500)
     assert id.startswith('recovery:')
     assert refill(now=600) is None
     with db.connect() as c:
-        row=c.execute('SELECT * FROM outbox WHERE id=?',(id,)).fetchone()
+        row=c.execute('SELECT * FROM outbox WHERE id=%s',(id,)).fetchone()
         assert json.loads(row['body'])['kind']=='recovery'
         assert row['queue']=='priority-downloads'
 
@@ -164,7 +164,7 @@ def test_recovery_selects_only_eligible_new_artists_without_waiting_for_ten(meta
     monkeypatch.setattr(downloads,'DEMO',False)
     with db.transaction() as c:
         for i in range(4):
-            c.execute('INSERT INTO plays(id,track_id,metadata,starts,ends) VALUES(?,?,?,?,?)',(str(i),'old',json.dumps(metadata),i*100,i*100+90))
+            c.execute('INSERT INTO plays(id,track_id,metadata,starts,ends) VALUES(%s,%s,%s,%s,%s)',(str(i),'old',json.dumps(metadata),i*100,i*100+90))
     add('blocked',metadata)
     add('new',{**metadata,'artists':['New Artist'],'album_id':'new'})
     monkeypatch.setattr('app.discovery.discover',lambda: (_ for _ in ()).throw(AssertionError('Existing eligible source should be used first')))
@@ -192,8 +192,8 @@ def test_refill_search_does_not_hold_writer_lock(metadata,monkeypatch):
     real=downloads.balanced_sample
     def check(pool,*args):
         with db.connect() as c:
-            c.execute('PRAGMA busy_timeout=50')
-            c.execute('BEGIN IMMEDIATE')
+            c.execute("SET LOCAL lock_timeout='50ms'")
+            db.lock_writes(c)
             db.set_setting(c,'independent-writer','worked')
         return real(pool,*args)
     monkeypatch.setattr(downloads,'balanced_sample',check)
@@ -212,7 +212,7 @@ def test_refill_keeps_nine_fresh_genres_and_least_played_repeat(metadata):
     add('rare',meta,'ready',1)
     with db.transaction() as c:
         for i in range(5):
-            c.execute('INSERT INTO plays(id,track_id,metadata,starts,ends,actual_end) VALUES(?,?,?,?,?,?)',
+            c.execute('INSERT INTO plays(id,track_id,metadata,starts,ends,actual_end) VALUES(%s,%s,%s,%s,%s,%s)',
                       (str(i),'often',json.dumps(meta),i+1,i+2,i+2))
     plan,_=downloads.plan_job({'kind':'refill','id':'balanced'})
     assert set(plan['tracks'])=={'rare'}|{'new-'+str(i) for i in range(9)}

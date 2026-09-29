@@ -5,7 +5,7 @@ from app.service import accept_reaction, process_reaction, ReactionCooldown
 
 def event(id):
     with db.connect() as c:
-        return json.loads(c.execute('SELECT metadata FROM reactions WHERE id=?',(id,)).fetchone()[0])
+        return json.loads(c.execute('SELECT metadata FROM reactions WHERE id=%s',(id,)).fetchone()[0])
 
 def boosts():
     with db.connect() as c:

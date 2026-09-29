@@ -46,7 +46,7 @@ def retrieve(query, items):
         documents[item['id']] = json.dumps({k: item.get(k) for k in ('title','artists','album','genre')}) + ' ' + moods
     model = 'text-embedding-3-small:256'
     with db.connect() as c:
-        cache = {r['track_id']: dict(r) for r in c.execute('SELECT * FROM rag_embeddings WHERE model=?', (model,))}
+        cache = {r['track_id']: dict(r) for r in c.execute('SELECT * FROM rag_embeddings WHERE model=%s', (model,))}
     missing = [id for id, doc in documents.items() if id not in cache or cache[id]['digest'] != hashlib.sha256(doc.encode()).hexdigest()]
     # Bound indexing cost per turn; subsequent turns progressively index a large library.
     for offset in range(0, min(len(missing), 128), 32):
@@ -55,7 +55,7 @@ def retrieve(query, items):
         with db.transaction() as c:
             for id, vector in zip(ids, vectors):
                 digest = hashlib.sha256(documents[id].encode()).hexdigest()
-                c.execute('INSERT OR REPLACE INTO rag_embeddings VALUES(?,?,?,?)', (id, model, digest, json.dumps(vector)))
+                c.execute('INSERT INTO rag_embeddings VALUES(%s,%s,%s,%s) ON CONFLICT(track_id) DO UPDATE SET model=excluded.model,digest=excluded.digest,vector=excluded.vector', (id, model, digest, json.dumps(vector)))
                 cache[id] = {'digest': digest, 'vector': json.dumps(vector)}
     qvector = embed([query])[0]
     words = set(normalize(query).split())
@@ -115,23 +115,23 @@ def submit(query, mode, listener, request_id):
     from app.requests import normalize, public
     now = time.time()
     with db.transaction() as c:
-        old = c.execute('SELECT * FROM requests WHERE id=?',(request_id,)).fetchone()
+        old = c.execute('SELECT * FROM requests WHERE id=%s',(request_id,)).fetchone()
         if old:
             if (old['listener'],old['query'],old['mode']) != (listener,query,mode):
                 raise ValueError('This request ID has already been used.')
             return public(old)
-        if c.execute('SELECT 1 FROM rag_turns WHERE listener=? AND busy=1 AND created>?',(listener,now-300)).fetchone():
+        if c.execute('SELECT 1 FROM rag_turns WHERE listener=%s AND busy=1 AND created>%s',(listener,now-300)).fetchone():
             raise ValueError('Please wait for your previous message to finish.')
-        count = c.execute('SELECT COUNT(*) FROM rag_turns WHERE created>?',(now-86400,)).fetchone()[0]
-        recent = c.execute('SELECT COUNT(*) FROM rag_turns WHERE listener=? AND created>?',(listener,now-60)).fetchone()[0]
+        count = c.execute('SELECT COUNT(*) FROM rag_turns WHERE created>%s',(now-86400,)).fetchone()[0]
+        recent = c.execute('SELECT COUNT(*) FROM rag_turns WHERE listener=%s AND created>%s',(listener,now-60)).fetchone()[0]
         if count >= int(os.getenv('OPENAI_CHAT_DAILY_LIMIT','500')) or recent >= 10:
             raise ValueError('Chat is busy. Please try again later.')
-        c.execute('INSERT OR REPLACE INTO rag_turns VALUES(?,?,?,1)',(request_id,listener,now))
+        c.execute('INSERT INTO rag_turns VALUES(%s,%s,%s,1) ON CONFLICT(id) DO UPDATE SET listener=excluded.listener,created=excluded.created,busy=excluded.busy',(request_id,listener,now))
         items = catalog(c)
-        history = [dict(r) for r in c.execute('SELECT query,response FROM requests WHERE listener=? ORDER BY sequence DESC LIMIT 8',(listener,))][::-1]
-        pending_row = c.execute('SELECT * FROM rag_pending WHERE listener=?',(listener,)).fetchone()
+        history = [dict(r) for r in c.execute('SELECT query,response FROM requests WHERE listener=%s ORDER BY sequence DESC LIMIT 8',(listener,))][::-1]
+        pending_row = c.execute('SELECT * FROM rag_pending WHERE listener=%s',(listener,)).fetchone()
         pending = {'genres':json.loads(pending_row['genres']), 'track_ids':json.loads(pending_row['track_ids'])} if pending_row else None
-        play = c.execute('SELECT metadata FROM plays WHERE starts<=? AND ends>? AND actual_end IS NULL ORDER BY starts DESC LIMIT 1',(now,now)).fetchone()
+        play = c.execute('SELECT metadata FROM plays WHERE starts<=%s AND ends>%s AND actual_end IS NULL ORDER BY starts DESC LIMIT 1',(now,now)).fetchone()
         station = {'now_playing':json.loads(play[0]) if play else None,
                    'pending_requests':c.execute("SELECT COUNT(*) FROM requests WHERE status='pending'").fetchone()[0]}
     try:
@@ -209,21 +209,21 @@ def submit(query, mode, listener, request_id):
                 reply = f"Queued “{track['title']}” by {' & '.join(track['artists'])} at request position {position}, ahead of automatic selections when eligible. Blocked or downloading requests are deferred."
                 cited = [track]
             if status in {'pending','cancelled','awaiting_confirmation'}:
-                c.execute('DELETE FROM rag_pending WHERE listener=?',(listener,))
+                c.execute('DELETE FROM rag_pending WHERE listener=%s',(listener,))
             if status == 'awaiting_confirmation':
-                c.execute('INSERT INTO rag_pending VALUES(?,?,?)',(listener,json.dumps(suggestions),json.dumps([t['id'] for t in cited] or ([track['id']] if track else []))))
+                c.execute('INSERT INTO rag_pending VALUES(%s,%s,%s)',(listener,json.dumps(suggestions),json.dumps([t['id'] for t in cited] or ([track['id']] if track else []))))
             sources = [{k:t.get(k) for k in ('id','title','bandcamp_url')} for t in cited]
             if track_id and decision['intent']=='confirmation':
                 from app import telemetry
                 telemetry.emit('request.confirmed',who=listener,request_id=request_id,track_id=track_id)
-            c.execute('INSERT INTO requests(id,listener,query,mode,response,track_id,status,created,suggestions,sources,engine) VALUES(?,?,?,?,?,?,?,?,?,?,?)',
+            c.execute('INSERT INTO requests(id,listener,query,mode,response,track_id,status,created,suggestions,sources,engine) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)',
                       (request_id,listener,query,mode,reply,track_id,status,time.time(),json.dumps(suggestions),json.dumps(sources),'rag'))
             if track_id:
                 if genre_request:
-                    c.execute('UPDATE requests SET requested_genre=? WHERE id=?',(genre_request,request_id))
-                c.execute('DELETE FROM playlist WHERE track_id=?',(track_id,))
+                    c.execute('UPDATE requests SET requested_genre=%s WHERE id=%s',(genre_request,request_id))
+                c.execute('DELETE FROM playlist WHERE track_id=%s',(track_id,))
                 db.emit(c,'request:'+request_id,'request-downloads',{'kind':'request','track_id':track_id,'request_id':request_id})
-            return public(c.execute('SELECT * FROM requests WHERE id=?',(request_id,)).fetchone())
+            return public(c.execute('SELECT * FROM requests WHERE id=%s',(request_id,)).fetchone())
     finally:
         with db.transaction() as c:
-            c.execute('UPDATE rag_turns SET busy=0 WHERE id=?',(request_id,))
+            c.execute('UPDATE rag_turns SET busy=0 WHERE id=%s',(request_id,))

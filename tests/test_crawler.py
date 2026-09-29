@@ -20,7 +20,7 @@ def test_host_validation_and_distinct_completion_counts(metadata):
 
 def test_historical_backfill_does_not_invent_cdn(metadata):
     with db.transaction() as c:
-        c.execute("INSERT INTO tracks(id,metadata,status,downloaded_at) VALUES('a',?,'ready',100)",(json.dumps(metadata),))
+        c.execute("INSERT INTO tracks(id,metadata,status,downloaded_at) VALUES('a',%s,'ready',100)",(json.dumps(metadata),))
         hosts.bootstrap(c);hosts.bootstrap(c)
         assert c.execute("SELECT tracks_downloaded FROM source_hosts WHERE hostname='example.bandcamp.com'").fetchone()[0]==1
         assert c.execute('SELECT media_host FROM host_downloads').fetchone()[0] is None
@@ -101,7 +101,7 @@ def test_new_crawl_imports_trigger_recovery_without_timer(monkeypatch):
     crawler.process({'id':'crawl-new','genre':None})
     crawler.process({'id':'crawl-new','genre':None})
     with db.connect() as c:
-        rows=c.execute("SELECT body FROM outbox WHERE json_extract(body,'$.kind')='recovery'").fetchall()
+        rows=c.execute("SELECT body FROM outbox WHERE (body::jsonb ->> 'kind')='recovery'").fetchall()
         assert len(rows)==1
         assert c.execute("SELECT tracks FROM crawl_runs WHERE id='crawl-new'").fetchone()[0]==5
 

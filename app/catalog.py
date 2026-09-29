@@ -27,14 +27,14 @@ def import_catalog(path, *, overwrite=True):
         for t in tracks:
             source, rights = t.pop('source_url', None), t.pop('rights', None)
             # Playing/downloaded identity must not change, or history could be bypassed.
-            existing = c.execute('SELECT * FROM tracks WHERE id=?', (t['id'],)).fetchone()
+            existing = c.execute('SELECT * FROM tracks WHERE id=%s', (t['id'],)).fetchone()
             if existing and not overwrite:
                 continue
             if existing and existing['status'] != 'available':
                 if json.loads(existing['metadata']) != t:
                     raise ValueError(f'{t["id"]}: downloaded track metadata is immutable')
                 continue
-            c.execute('INSERT INTO tracks(id,metadata,source,rights) VALUES(?,?,?,?) '
+            c.execute('INSERT INTO tracks(id,metadata,source,rights) VALUES(%s,%s,%s,%s) '
                       'ON CONFLICT(id) DO UPDATE SET metadata=excluded.metadata,source=excluded.source,rights=excluded.rights',
                       (t['id'],json.dumps(t),source,rights))
             from app.hosts import register

@@ -50,7 +50,7 @@ def inventory(c):
 
 
 def track_row(c,track_id):
-    row=c.execute('SELECT * FROM tracks WHERE id=?',(track_id,)).fetchone()
+    row=c.execute('SELECT * FROM tracks WHERE id=%s',(track_id,)).fetchone()
     if row is None or bool(json.loads(row['metadata']).get('demo'))!=DEMO:raise HTTPException(404,'Track not found.')
     return row
 
@@ -102,7 +102,7 @@ def playback_status(track_id:str):
     with db.connect() as c:
         row=track_row(c,track_id)
         result=public_track(row,capped(c))
-        job=c.execute('SELECT done,failed FROM outbox WHERE id=?',('listen:'+track_id,)).fetchone()
+        job=c.execute('SELECT done,failed FROM outbox WHERE id=%s',('listen:'+track_id,)).fetchone()
         if job and result['status']!='ready':
             if job['failed'] or job['done'] is not None:result['status']='unavailable'
             elif result['status']=='available':result['status']='preparing'
@@ -119,15 +119,15 @@ def prepare(track_id:str,request:Request):
         row=track_row(c,track_id);result=public_track(row,capped(c))
         if result['status']=='unavailable':raise HTTPException(409,'This recording is currently unavailable.')
         if result['status']=='ready':return result
-        existing=c.execute('SELECT done,failed FROM outbox WHERE id=?',('listen:'+track_id,)).fetchone()
+        existing=c.execute('SELECT done,failed FROM outbox WHERE id=%s',('listen:'+track_id,)).fetchone()
         if existing:
             if existing['done'] is not None or existing['failed']:raise HTTPException(409,'Audio preparation failed. Please try another track.')
             return dict(result,status='preparing')
         now=time.time()
-        c.execute('DELETE FROM personal_downloads WHERE created<?',(now-3600,))
-        if c.execute('SELECT COUNT(*) FROM personal_downloads WHERE listener=? AND created>?',(who,now-60)).fetchone()[0]>=10:
+        c.execute('DELETE FROM personal_downloads WHERE created<%s',(now-3600,))
+        if c.execute('SELECT COUNT(*) FROM personal_downloads WHERE listener=%s AND created>%s',(who,now-60)).fetchone()[0]>=10:
             raise HTTPException(429,'Please wait a minute before preparing more tracks.')
-        c.execute('INSERT INTO personal_downloads(listener,created) VALUES(?,?)',(who,now))
+        c.execute('INSERT INTO personal_downloads(listener,created) VALUES(%s,%s)',(who,now))
         db.emit(c,'listen:'+track_id,'request-downloads',{'kind':'listen','track_id':track_id})
         return dict(result,status='preparing')
 

@@ -1,7 +1,9 @@
 name: radioworkx
 x-app: &app
   build: .
+  image: ${RADIO_WORKER_IMAGE:-radioworkx-worker:local}
   environment: &env
+    DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL to your PostgreSQL database}
     DATA_DIR: ${RADIO_DATA_DIR:-/data}
     REDIS_URL: redis://redis:6379/${REDIS_DB:-0}
     QUEUE_PREFIX: ${QUEUE_PREFIX:-radio}

@@ -8,14 +8,14 @@ from app.config import THRESHOLD
 
 def now_playing(c, now=None):
     now = time.time() if now is None else now
-    row = c.execute('SELECT * FROM plays WHERE starts<=? AND ends>? AND actual_end IS NULL ORDER BY starts DESC LIMIT 1',
+    row = c.execute('SELECT * FROM plays WHERE starts<=%s AND ends>%s AND actual_end IS NULL ORDER BY starts DESC LIMIT 1',
                     (now,now)).fetchone()
     if not row:
         return None
     announcement=json.loads(db.setting(c,'announcement_on_air','null'))
     if announcement and announcement.get('play_id')==row['id']:
         return None
-    requested=bool(c.execute("SELECT 1 FROM requests WHERE play_id=? AND status IN ('playing','played')",(row['id'],)).fetchone())
+    requested=bool(c.execute("SELECT 1 FROM requests WHERE play_id=%s AND status IN ('playing','played')",(row['id'],)).fetchone())
     return {**dict(row),'metadata':json.loads(row['metadata']),'requested':requested}
 
 COOLDOWN = 1
@@ -28,7 +28,7 @@ class ReactionCooldown(ValueError):
 
 
 def next_reaction_at(c, listener):
-    row=c.execute('SELECT MAX(accepted) FROM reactions WHERE listener=?',(listener,)).fetchone()
+    row=c.execute('SELECT MAX(accepted) FROM reactions WHERE listener=%s',(listener,)).fetchone()
     return (row[0]+COOLDOWN) if row[0] is not None else 0
 
 
@@ -36,7 +36,7 @@ def accept_reaction(play_id, listener, emoji, now=None, event_id=None):
     now = time.time() if now is None else now
     with db.transaction() as c:
         if event_id:
-            previous=c.execute('SELECT * FROM reactions WHERE id=?',(event_id,)).fetchone()
+            previous=c.execute('SELECT * FROM reactions WHERE id=%s',(event_id,)).fetchone()
             if previous:
                 if (previous['play_id'],previous['listener'],previous['emoji']) != (play_id,listener,emoji):
                     raise ValueError('Reaction ID already used for a different event')
@@ -51,7 +51,7 @@ def accept_reaction(play_id, listener, emoji, now=None, event_id=None):
         event = dict(id=event_id or str(uuid.uuid4()),play_id=play_id,listener=listener,emoji=emoji,
                      accepted=now,ends=play['ends'],track_id=play['track_id'],
                      artists=meta['artists'],genre=meta['genre'],album_id=meta['album_id'])
-        c.execute('INSERT INTO reactions(id,play_id,listener,emoji,accepted,metadata) VALUES(?,?,?,?,?,?)',
+        c.execute('INSERT INTO reactions(id,play_id,listener,emoji,accepted,metadata) VALUES(%s,%s,%s,%s,%s,%s)',
                   (event['id'],play_id,listener,emoji,now,json.dumps(event)))
         db.emit(c,event['id'],'reactions',event)
         return event['id']
@@ -59,14 +59,14 @@ def accept_reaction(play_id, listener, emoji, now=None, event_id=None):
 def process_reaction(event, now=None):
     now = time.time() if now is None else now
     with db.transaction() as c:
-        row = c.execute('SELECT * FROM reactions WHERE id=?', (event['id'],)).fetchone()
+        row = c.execute('SELECT * FROM reactions WHERE id=%s', (event['id'],)).fetchone()
         if not row:
             raise ValueError('Unknown reaction event')
         # Trust the durable server-authored event, not fields supplied on a queue.
         event = json.loads(row['metadata'])
         if not row['processed']:
-            c.execute('UPDATE reactions SET processed=1 WHERE id=?',(event['id'],))
-            count = c.execute('SELECT COUNT(*) FROM reactions WHERE play_id=? AND processed=1',
+            c.execute('UPDATE reactions SET processed=1 WHERE id=%s',(event['id'],))
+            count = c.execute('SELECT COUNT(*) FROM reactions WHERE play_id=%s AND processed=1',
                               (event['play_id'],)).fetchone()[0]
             active = now_playing(c,now)
             # All accepted reactions on a play share its artist(s) and genre.

@@ -40,9 +40,9 @@ The LocalStack image is built directly from fork revision `8b9a79f05846835cf4dff
 | Fast API backend | FastAPI serves the site, JSON APIs, the shared live MP3 stream, and SSE. |
 | Random initial playlist of 10 Bandcamp tracks, each a different genre and artist | A shuffled, backtracking sampler selects exactly 10 distinct genres with disjoint featured artists from the operator catalog. It waits if no valid set of 10 exists. `catalog/initial-selection.json` records the first real ten-track batch selected from the licensed source pool; later batches are selected at runtime from usable sources. |
 | Different artists | All `artists` entries are considered, including featured collaborators. Stable, canonical names/IDs must be used across the catalog. |
-| Emoji reactions | ❤️ 🔥 🙌 😍 💃 🤯. The same listener session can react repeatedly, including the same emoji on the same track, after a one-second cooldown between accepted reactions. The page displays a countdown. SQLite atomically enforces the cooldown across tabs and restarts. Each emoji counts as one positive reaction. |
+| Emoji reactions | ❤️ 🔥 🙌 😍 💃 🤯. The same listener session can react repeatedly, including the same emoji on the same track, after a one-second cooldown between accepted reactions. The page displays a countdown. PostgreSQL atomically enforces the cooldown across tabs and restarts. Each emoji counts as one positive reaction. |
 | Broadcast reactions with SSE | `/api/events` sends reaction events, track transitions, ranking/state snapshots, IDs, and periodic heartbeat snapshots. Reconnection uses `Last-Event-ID`. |
-| Capture reactions on SQS, including artist and genre | Accepted events are first committed with a SQLite outbox, then dispatched to `radio-reactions`. Message bodies carry track, play, all featured artists, album, genre, emoji, accepted timestamp, and listener ID. Artist and genre are also SQS message attributes. |
+| Capture reactions on SQS, including artist and genre | Accepted events are first committed with a PostgreSQL outbox, then dispatched to `radio-reactions`. Message bodies carry track, play, all featured artists, album, genre, emoji, accepted timestamp, and listener ID. Artist and genre are also SQS message attributes. |
 | Consumer ranks genres in Redis | The reaction worker performs an idempotent Redis Lua transaction using `ZINCRBY` on `radio:genres` and appends an SSE event to `radio:events`. Rankings show outstanding reaction demand, highest first; a successful listener-request or reaction-triggered acquisition removes the fulfilled genre. |
 | More than 20 artist or genre reactions before the track ends | Default `REACTION_THRESHOLD=20`: the 21st processed reaction during the current play creates one priority download job. All reactions on that play share its artist(s)/genre, so the two simultaneous crossings are coalesced. Counts reset with each play; the genre score clears when its requested acquisition succeeds. |
 | Grab another song from that artist or album | A priority job randomly selects a different authorized track sharing an artist or album, falling back to the current genre if neither is available. If no suitable source exists, it records that fact and keeps the current program. |
@@ -50,7 +50,7 @@ The LocalStack image is built directly from fork revision `8b9a79f05846835cf4dff
 | Fetch only when needed | At startup, or when **current track + queued tracks ≤ 3**, the station enqueues a refill of 10. Only one refill is outstanding at a time; waiting/empty catalogs retry at most once every five minutes. |
 | Download 10 more tracks | Refill selection prefers 10 previously undownloaded tracks across 10 genres. If the available source catalog cannot supply that set, it supplements with cached tracks. It never manufactures sources. Within the last slots before the cap, it downloads only the remaining capacity. |
 | SQS downloader jobs and consumers | Durable job plans, per-track completion, SQS retries, capacity reservations, bounded downloads, MP3 normalization, and atomic file replacement. A partial batch retry does not requeue tracks already handled or transmitted. |
-| Stop at 10,000 downloaded tracks | SQLite serializes slot reservations across all three download consumers. Completed downloads plus active reservations cannot exceed **10,000**. At 10,000 successful unique catalog track downloads, a durable latch permanently disables new acquisition, including reaction-triggered downloads. |
+| Stop at 10,000 downloaded tracks | PostgreSQL serializes slot reservations across all three download consumers. Completed downloads plus active reservations cannot exceed **10,000**. At 10,000 successful unique catalog track downloads, a durable latch permanently disables new acquisition, including reaction-triggered downloads. |
 | Reuse the library after the cap | All later refills and reaction follow-ups use only existing downloaded tracks. Artist, album, compilation, and consecutive limits still apply. The cap is station-wide, not per playlist; there is no automatic eviction/reset. |
 
 The threshold is configurable, but the 10,000-track maximum is deliberately a code-level ceiling. A “track” for capacity accounting means a unique canonical catalog ID. Do not import the same recording under multiple IDs.
@@ -138,7 +138,7 @@ Downloads reject redirects, non-HTTPS/non-allowlisted origins, files larger than
 ```mermaid
 flowchart LR
     Browser -->|emoji POST| API[FastAPI]
-    API -->|reaction + outbox transaction| DB[(SQLite WAL)]
+    API -->|reaction + outbox transaction| DB[(PostgreSQL)]
     DB --> Dispatcher
     Dispatcher -->|LocalStack| RQ[SQS reactions]
     RQ --> RC[Reaction consumer]
@@ -155,7 +155,12 @@ flowchart LR
     API --> Browser
 ```
 
-**Durable state:** one SQLite database on the shared `radio-data` Docker volume stores catalogs, playlist, plays, reactions, outbox, job progress, and the permanent cap latch. `audio/` on the same volume holds normalized recordings. Redis uses AOF with `appendfsync always` on a separate volume. Back up both volumes together before changing deployments.
+**Durable state:** a dedicated PostgreSQL database stores catalogs, playlists, plays,
+reactions, outbox, job progress, account collections, observer checkpoints, and the
+permanent cap latch. `audio/` on the shared `radio-data` volume holds normalized
+recordings. Redis uses AOF with `appendfsync always` on a separate volume. Back up
+PostgreSQL and these volumes together. See [PostgreSQL migration](POSTGRES_MIGRATION.md)
+for the required coordinated cutover from an existing SQLite installation.
 
 **Queue processing:** standard SQS queues with at-least-once delivery; each has a `-dead` dead-letter queue after five unsuccessful receives. Reactions have 60-second visibility; downloads have 900 seconds. Visibility is renewed while a message is being processed. Outbox records are marked complete only after durable job processing and Redis projection. Unacknowledged outbox records are resent after 20 minutes to recover from loss of LocalStack’s in-memory queue state. Exhausted jobs stop automatic outbox resends and retain their failure type for operator review. Queue initialization is automatic and idempotent.
 
@@ -165,14 +170,14 @@ flowchart LR
 
 **Timing:** both acceptance and threshold processing must occur before the play ends. A delayed reaction still contributes to the genre demand ranking, but it cannot trigger a follow-up after the current track ends. No forced skipping or interruption occurs on a threshold crossing.
 
-## SQLite schema reference
+## PostgreSQL schema reference
 
-The application database is `radio.db` under `RADIO_DATA_DIR`. The definitions below
-reflect `app/db.py` after its startup migrations have added the announcement-reference
-columns to `tracks`, the response-context columns to `requests`, and the current
-non-unique reaction model. JSON is stored as `TEXT`; Unix timestamps are stored as
-`REAL`; SQLite uses `INTEGER` values for Boolean flags. `sqlite_sequence`, which
-SQLite creates automatically for `AUTOINCREMENT` tables, is not an application table.
+The application database is configured through `DATABASE_URL`. Definitions live in
+`app/schema.sql`; startup adds any missing schema objects. JSON remains `TEXT`, Unix
+timestamps use `DOUBLE PRECISION`, and existing Boolean flags retain `INTEGER` values.
+Playlist positions and request sequences use `BIGINT` identity columns. The observer's
+two tables share this database. The schema file also includes listener account,
+session, liked-track, and personal playlist tables.
 
 ### Listener limits and acquisition failures
 
@@ -181,7 +186,7 @@ SQLite creates automatically for `AUTOINCREMENT` tables, is not an application t
 | Column | Type | Constraints/default |
 | --- | --- | --- |
 | `listener` | `TEXT` | `NOT NULL` |
-| `created` | `REAL` | `NOT NULL` |
+| `created` | `DOUBLE PRECISION` | `NOT NULL` |
 
 #### `failed_downloads`
 
@@ -195,7 +200,7 @@ SQLite creates automatically for `AUTOINCREMENT` tables, is not an application t
 | `page_url` | `TEXT` | Nullable |
 | `error_type` | `TEXT` | `NOT NULL` |
 | `error_detail` | `TEXT` | `NOT NULL` |
-| `created` | `REAL` | `NOT NULL` |
+| `created` | `DOUBLE PRECISION` | `NOT NULL` |
 | `replacement_id` | `TEXT` | Nullable |
 
 `personal_downloads` is the per-listener preparation-rate ledger.
@@ -211,9 +216,9 @@ diagnostics; its URLs and error details are private admin data.
 | `id` | `TEXT` | `PRIMARY KEY` |
 | `name` | `TEXT` | `NOT NULL` |
 | `digest` | `TEXT` | `NOT NULL UNIQUE` |
-| `created` | `REAL` | `NOT NULL` |
-| `last_used` | `REAL` | Nullable |
-| `revoked` | `REAL` | Nullable |
+| `created` | `DOUBLE PRECISION` | `NOT NULL` |
+| `last_used` | `DOUBLE PRECISION` | Nullable |
+| `revoked` | `DOUBLE PRECISION` | Nullable |
 
 Only a SHA-256 token digest is stored. `revoked` is null while a token is active.
 
@@ -228,10 +233,10 @@ Only a SHA-256 token digest is stored. `revoked` is null while a token is active
 | `source` | `TEXT` | Nullable |
 | `rights` | `TEXT` | Nullable |
 | `status` | `TEXT` | `NOT NULL DEFAULT 'available'` |
-| `duration` | `REAL` | Nullable |
+| `duration` | `DOUBLE PRECISION` | Nullable |
 | `path` | `TEXT` | Nullable |
 | `error` | `TEXT` | Nullable |
-| `downloaded_at` | `REAL` | Nullable |
+| `downloaded_at` | `DOUBLE PRECISION` | Nullable |
 | `intro_id` | `TEXT` | Nullable; foreign key → `announcements(id)` |
 | `requested_intro_id` | `TEXT` | Nullable; foreign key → `announcements(id)` |
 
@@ -250,9 +255,9 @@ Only a SHA-256 token digest is stored. `revoked` is null while a token is active
 | `id` | `TEXT` | `PRIMARY KEY` |
 | `track_id` | `TEXT` | `NOT NULL` |
 | `metadata` | `TEXT` | `NOT NULL`; JSON snapshot |
-| `starts` | `REAL` | `NOT NULL` |
-| `ends` | `REAL` | `NOT NULL` |
-| `actual_end` | `REAL` | Nullable |
+| `starts` | `DOUBLE PRECISION` | `NOT NULL` |
+| `ends` | `DOUBLE PRECISION` | `NOT NULL` |
+| `actual_end` | `DOUBLE PRECISION` | Nullable |
 
 `tracks.metadata` is the canonical catalog snapshot. `playlist` contains automatic
 and priority selections still awaiting transmission. `plays` is immutable broadcast
@@ -268,9 +273,9 @@ interrupted.
 | `id` | `TEXT` | `PRIMARY KEY` |
 | `queue` | `TEXT` | `NOT NULL` |
 | `body` | `TEXT` | `NOT NULL`; JSON |
-| `created` | `REAL` | `NOT NULL` |
-| `sent` | `REAL` | Nullable |
-| `done` | `REAL` | Nullable |
+| `created` | `DOUBLE PRECISION` | `NOT NULL` |
+| `sent` | `DOUBLE PRECISION` | Nullable |
+| `done` | `DOUBLE PRECISION` | Nullable |
 | `failed` | `TEXT` | Nullable |
 
 #### `reactions`
@@ -281,7 +286,7 @@ interrupted.
 | `play_id` | `TEXT` | `NOT NULL` |
 | `listener` | `TEXT` | `NOT NULL` |
 | `emoji` | `TEXT` | `NOT NULL` |
-| `accepted` | `REAL` | `NOT NULL` |
+| `accepted` | `DOUBLE PRECISION` | `NOT NULL` |
 | `metadata` | `TEXT` | `NOT NULL`; JSON snapshot |
 | `processed` | `INTEGER` | `DEFAULT 0`; Boolean flag |
 
@@ -297,7 +302,7 @@ interrupted.
 | `response` | `TEXT` | `NOT NULL` |
 | `track_id` | `TEXT` | Nullable; foreign key → `tracks(id)` |
 | `status` | `TEXT` | `NOT NULL` |
-| `created` | `REAL` | `NOT NULL` |
+| `created` | `DOUBLE PRECISION` | `NOT NULL` |
 | `play_id` | `TEXT` | Nullable |
 | `suggestions` | `TEXT` | `NOT NULL DEFAULT '[]'`; JSON |
 | `sources` | `TEXT` | `NOT NULL DEFAULT '[]'`; JSON |
@@ -349,7 +354,7 @@ of the public UUID in `requests.id`.
 | --- | --- | --- |
 | `id` | `TEXT` | `PRIMARY KEY` |
 | `listener` | `TEXT` | `NOT NULL` |
-| `created` | `REAL` | `NOT NULL` |
+| `created` | `DOUBLE PRECISION` | `NOT NULL` |
 | `busy` | `INTEGER` | `NOT NULL DEFAULT 1`; Boolean flag |
 
 `conversations` preserves per-listener conversational genre context.
@@ -367,8 +372,8 @@ awaiting confirmation, while `rag_turns` supports chat concurrency and rate trac
 | `script` | `TEXT` | `NOT NULL` |
 | `details` | `TEXT` | `NOT NULL`; JSON evidence/details |
 | `path` | `TEXT` | `NOT NULL` |
-| `duration` | `REAL` | `NOT NULL` |
-| `created` | `REAL` | `NOT NULL` |
+| `duration` | `DOUBLE PRECISION` | `NOT NULL` |
+| `created` | `DOUBLE PRECISION` | `NOT NULL` |
 | `voice` | `TEXT` | `NOT NULL` |
 
 An announcement row contains the validated script, supporting details, cached audio
@@ -387,8 +392,8 @@ requested-play introductions.
 | `status` | `TEXT` | `NOT NULL` |
 | `discovered_from` | `TEXT` | Nullable |
 | `notes` | `TEXT` | `NOT NULL DEFAULT ''` |
-| `first_seen` | `REAL` | `NOT NULL` |
-| `last_seen` | `REAL` | `NOT NULL` |
+| `first_seen` | `DOUBLE PRECISION` | `NOT NULL` |
+| `last_seen` | `DOUBLE PRECISION` | `NOT NULL` |
 | `tracks_downloaded` | `INTEGER` | `NOT NULL DEFAULT 0` |
 
 #### `host_downloads`
@@ -398,7 +403,7 @@ requested-play introductions.
 | `track_id` | `TEXT` | `PRIMARY KEY` |
 | `source_host` | `TEXT` | `NOT NULL` |
 | `media_host` | `TEXT` | Nullable |
-| `completed` | `REAL` | `NOT NULL` |
+| `completed` | `DOUBLE PRECISION` | `NOT NULL` |
 
 #### `crawl_frontier`
 
@@ -409,7 +414,7 @@ requested-play introductions.
 | `genre` | `TEXT` | Nullable |
 | `depth` | `INTEGER` | `NOT NULL DEFAULT 0` |
 | `discovered_from` | `TEXT` | Nullable |
-| `next_attempt` | `REAL` | `NOT NULL DEFAULT 0` |
+| `next_attempt` | `DOUBLE PRECISION` | `NOT NULL DEFAULT 0` |
 | `status` | `TEXT` | `NOT NULL DEFAULT 'pending'` |
 | `error` | `TEXT` | Nullable |
 
@@ -418,8 +423,8 @@ requested-play introductions.
 | Column | Type | Constraints/default |
 | --- | --- | --- |
 | `id` | `TEXT` | `PRIMARY KEY` |
-| `started` | `REAL` | `NOT NULL` |
-| `finished` | `REAL` | Nullable |
+| `started` | `DOUBLE PRECISION` | `NOT NULL` |
+| `finished` | `DOUBLE PRECISION` | Nullable |
 | `pages` | `INTEGER` | `NOT NULL DEFAULT 0` |
 | `tracks` | `INTEGER` | `NOT NULL DEFAULT 0` |
 | `errors` | `INTEGER` | `NOT NULL DEFAULT 0` |
@@ -439,7 +444,7 @@ crawler and host repository.” `host_downloads` is a per-track ledger, while
 | `kind` | `TEXT` | `NOT NULL` |
 | `path` | `TEXT` | `NOT NULL` |
 | `mime` | `TEXT` | `NOT NULL` |
-| `checked` | `REAL` | Nullable |
+| `checked` | `DOUBLE PRECISION` | Nullable |
 
 #### `track_visuals`
 
@@ -447,9 +452,9 @@ crawler and host repository.” `host_downloads` is a per-track ledger, while
 | --- | --- | --- |
 | `track_id` | `TEXT` | `PRIMARY KEY` |
 | `status` | `TEXT` | `NOT NULL` |
-| `created` | `REAL` | `NOT NULL` |
-| `submitted` | `REAL` | Nullable |
-| `completed` | `REAL` | Nullable |
+| `created` | `DOUBLE PRECISION` | `NOT NULL` |
+| `submitted` | `DOUBLE PRECISION` | Nullable |
+| `completed` | `DOUBLE PRECISION` | Nullable |
 | `provider_id` | `TEXT` | Nullable |
 | `artwork_source` | `TEXT` | Nullable |
 | `artwork_key` | `TEXT` | Nullable |
@@ -461,7 +466,7 @@ generation lifecycle per track, including provider submission and cached keys.
 
 ### Application settings
 
-#### `settings` (`radio.db`)
+#### `settings`
 
 | Column | Type | Constraints/default |
 | --- | --- | --- |
@@ -481,28 +486,28 @@ It is distinct from the telemetry observer's private `settings` table below.
 | `reaction_listener` | `reactions` | `listener`, `accepted` | No |
 | `play_time` | `plays` | `ends` | No |
 
-Primary-key and unique declarations also create SQLite-managed indexes.
+Primary-key and unique declarations also create PostgreSQL-managed indexes.
 
-### Telemetry observer database
+### Telemetry observer checkpoints
 
-The observer uses a separate `/telemetry/observer.sqlite`, not `radio.db`:
+Observer checkpoints live in the same PostgreSQL database:
 
-#### `settings` (`observer.sqlite`)
+#### `observer_settings`
 
 | Column | Type | Constraints/default |
 | --- | --- | --- |
 | `key` | `TEXT` | `PRIMARY KEY` |
-| `value` | `TEXT` | Nullable |
+| `value` | `TEXT` | `NOT NULL` |
 
-#### `seen`
+#### `observer_seen`
 
 | Column | Type | Constraints/default |
 | --- | --- | --- |
 | `id` | `TEXT` | `PRIMARY KEY` |
-| `created` | `REAL` | Nullable |
+| `created` | `DOUBLE PRECISION` | `NOT NULL` |
 
-Observer `settings` records its initial scan time and hashes of selected environment
-configuration. `seen` stores deterministic lifecycle keys so the two-second polling
+`observer_settings` records its initial scan time and hashes of selected environment
+configuration. `observer_seen` stores deterministic lifecycle keys so the two-second polling
 loop does not emit the same derived event repeatedly. Entries older than 35 days are
 periodically removed.
 
@@ -614,7 +619,7 @@ Vague requests such as “I want something matching my mood right now” ask abo
 
 Mood suggestions do **not** create download jobs or reserve FIFO positions. A genre button/name confirms that choice; “yes”, “sounds good”, or “surprise me” authorizes a random choice among the offered genres. Ordinal replies such as “the second one” also work. Another mood refines the suggestions, “no thanks” cancels, and a specific artist/album/track request replaces the pending suggestion and is processed immediately. At confirmation the catalog is checked again; only then is the existing FIFO/SQS acquisition flow used. Download caps, source authorization, and playback limits continue to apply.
 
-Conversation context and suggested genres persist in SQLite for each signed listener session, including across refreshes/restarts. Request replies and history include `suggestions` and `awaiting_confirmation`/`cancelled` states. Confirmation retries with the same UUID remain idempotent. After a completed confirmation, a later “yes” cannot silently repeat the old request.
+Conversation context and suggested genres persist in PostgreSQL for each signed listener session, including across refreshes/restarts. Request replies and history include `suggestions` and `awaiting_confirmation`/`cancelled` states. Confirmation retries with the same UUID remain idempotent. After a completed confirmation, a later “yes” cannot silently repeat the old request.
 
 ### Reaction timing, rankings, and download visibility
 
@@ -690,7 +695,7 @@ The chat combines cached `text-embedding-3-small` embeddings with lexical matchi
 and retrieves up to 12 licensed catalog tracks. Metadata changes invalidate cached
 vectors. Indexing is bounded to 128 tracks per turn; a larger library is indexed
 progressively and unindexed entries remain searchable lexically. Embeddings are
-stored in SQLite. `OPENAI_CHAT_MODEL` defaults to `gpt-4.1-mini`.
+stored in PostgreSQL. `OPENAI_CHAT_MODEL` defaults to `gpt-4.1-mini`.
 
 The model receives retrieved public music metadata, available genres, current
 station information, and only that listener's last eight exchanges. It can discuss
@@ -814,7 +819,7 @@ follow crawler redirects. Unavailable or robot-restricted pages are recorded as
 deferred. `CRAWLER_ENABLED=0` disables scheduling; `CRAWLER_PAGE_BUDGET` is bounded
 between 1 and 50. Crawling stops after the music library cap is reached.
 
-SQLite tables:
+PostgreSQL tables:
 
 - `source_hosts`: hostname, provider, role, status, discovery provenance, notes,
   first/last seen, and `tracks_downloaded`.
@@ -977,7 +982,7 @@ failures are now visible beside the player; failed loading has an explicit retry
 
 Ten-genre selection collapses equivalent genre/featured-artist combinations, prunes
 impossible choices, and explores at most 5,000 search states. Selection runs outside
-SQLite's writer transaction; persisting the resulting plan uses a short transaction
+the PostgreSQL advisory writer transaction; persisting the resulting plan uses a short transaction
 and rechecks job idempotence. Per-track acquisition still enforces capacity and
 playback still rechecks artist/album limits. A difficult or impossible diverse batch
 therefore cannot monopolize the database and crash the station. When eligibility
@@ -998,7 +1003,7 @@ forecast continues to trigger recovery discovery/downloads.
 The landing page footer section shows the current ready, downloaded library size,
 reaction likes, completed downloads, accepted track requests, and a genre likes bar
 chart. Choose the last 24 hours, last 7 days (default), or all time. Every accepted
-emoji counts as one like; historical likes come from SQLite and remain after genre
+emoji counts as one like; historical likes come from PostgreSQL and remain after genre
 demand is fulfilled. The community pulse continues to show outstanding Redis demand.
 The public `/api/stats?period=7d` endpoint exposes aggregate counts only, with no
 listener identities or chat messages. Charts refresh every 30 seconds while the page
@@ -1097,7 +1102,7 @@ Keep app tokens in calling-app backend configuration, never public browser bundl
 The admin list is paginated, shows masked tokens, creation/last-use timestamps and
 revocation state. Admin creation/revocation requires existing admin HTTP Basic
 credentials plus the same-origin token controls' `X-Admin-Action: tokens` header.
-Token responses use `Cache-Control: no-store`. SQLite `app_tokens` stores a SHA-256
+Token responses use `Cache-Control: no-store`. PostgreSQL `app_tokens` stores a SHA-256
 digest of a cryptographically random 256-bit secret, with label/id/timestamps;
 neither the full token nor a decryptable copy is persisted. Revocation rejects
 subsequent calls immediately; already accepted track requests remain queued.
@@ -1111,7 +1116,7 @@ sent through the durable outbox to the `download-failures` SQS queue (14-day mes
 retention). Admin → **Failed downloads** provides searchable, dated, paginated
 records with job/track IDs, source URL, artist-page URL, exception type/message and
 replacement ID. URLs/details stay behind admin authentication; the public status
-contains only safe status labels. The SQLite archive persists beyond SQS retention.
+contains only safe status labels. The PostgreSQL archive persists beyond SQS retention.
 
 The failed track is quarantined (`status=failed`) so automatic acquisition, catalog
 API and chat do not select it again. Reaction, refill, recovery and genre-request
@@ -1124,7 +1129,7 @@ succeeds, the job terminates rather than repeatedly fetching the known-bad URL.
 
 Ordinary source failures are handled inside the job, then its original SQS message
 is acknowledged. The failure queue is an archive, not another download work queue.
-It has no consumer by design; admin reads durable SQLite records without consuming
+It has no consumer by design; admin reads durable PostgreSQL records without consuming
 SQS messages. Failure notices are marked dispatched after sending, while retries of
 an interrupted send can produce duplicate notices with the same failure ID.
 
@@ -1169,15 +1174,15 @@ above; the abbreviated records are explanatory, not a production database export
 
 | Store | Table or queue | Purpose |
 | --- | --- | --- |
-| SQLite | `tracks` | Discovered catalog metadata, source URL, rights and audio status; `available` means cataloged, `ready` means downloaded. |
-| SQLite | `plays` | One row per broadcast, including `starts`, `ends`, `actual_end`; replaying a song creates a new play ID. |
-| SQLite | `reactions` | One row per accepted reaction, keyed by reaction ID; `play_id` identifies its broadcast. |
-| SQLite | `outbox` | Durable messages waiting for dispatch/completion, with queue name and instructions. |
-| SQLite | `jobs` | Download consumer's saved track plan and progress, keyed by the same application ID as its outbox message. |
-| SQLite | `failed_downloads` | Private source URL, page URL, error and replacement history for failed downloads. |
-| SQLite | `requests`, `rag_pending`, `rag_embeddings`, `rag_turns` | Chat/request history and FIFO sequence, pending confirmations, cached catalog vectors, and chat rate/busy accounting. |
-| SQLite | `playlist` | Automatic selections; accepted listener requests are scheduled separately from `requests`. |
-| LocalStack SQS | `radio-live-reactions`, `radio-live-priority-downloads`, `radio-live-request-downloads` | Work delivery; messages carry application IDs and instructions, not SQLite rows or audio. |
+| PostgreSQL | `tracks` | Discovered catalog metadata, source URL, rights and audio status; `available` means cataloged, `ready` means downloaded. |
+| PostgreSQL | `plays` | One row per broadcast, including `starts`, `ends`, `actual_end`; replaying a song creates a new play ID. |
+| PostgreSQL | `reactions` | One row per accepted reaction, keyed by reaction ID; `play_id` identifies its broadcast. |
+| PostgreSQL | `outbox` | Durable messages waiting for dispatch/completion, with queue name and instructions. |
+| PostgreSQL | `jobs` | Download consumer's saved track plan and progress, keyed by the same application ID as its outbox message. |
+| PostgreSQL | `failed_downloads` | Private source URL, page URL, error and replacement history for failed downloads. |
+| PostgreSQL | `requests`, `rag_pending`, `rag_embeddings`, `rag_turns` | Chat/request history and FIFO sequence, pending confirmations, cached catalog vectors, and chat rate/busy accounting. |
+| PostgreSQL | `playlist` | Automatic selections; accepted listener requests are scheduled separately from `requests`. |
+| LocalStack SQS | `radio-live-reactions`, `radio-live-priority-downloads`, `radio-live-request-downloads` | Work delivery; messages carry application IDs and instructions, not PostgreSQL rows or audio. |
 | Redis | `radio:genres` sorted set | Outstanding community genre scores; this is not the per-broadcast trigger counter. |
 | Redis | `radio:events` stream | Public updates delivered through SSE. |
 
@@ -1190,12 +1195,12 @@ There is no download `jobs` row for each individual reaction.
 ### Reaction → trigger → download → broadcast
 
 This is the worked **“what happens after the 21st reaction POST?”** explanation.
-Follow the arrows in order: each record names its SQLite table, and each message
+Follow the arrows in order: each record names its PostgreSQL table, and each message
 names its SQS queue. The reaction consumer is already running before this begins.
 
 ```text
 Station is broadcasting “Sex is the way” by Buzzy Boys
-SQLite plays:
+PostgreSQL plays:
   {id: PLAY-A, track_id: TRACK-A, starts: T0, ends: T_END,
    actual_end: null, metadata: {title: "Sex is the way", genre: "hip-hop", ...}}
         ↓
@@ -1204,7 +1209,7 @@ Browser → POST /api/reactions (listener session cookie)
         ↓
 API container — service.accept_reaction()
 Validates current broadcast and 1-second listener cooldown.
-In ONE SQLite transaction:
+In ONE PostgreSQL transaction:
   reactions:
     {id: REACTION-21, play_id: PLAY-A, listener: LISTENER-A,
      emoji: "🔥", accepted: T1, processed: 0, metadata: EVENT}
@@ -1220,7 +1225,7 @@ In ONE SQLite transaction:
 HTTP 202 returns event_id, status:"queued", next_reaction_at and server_time.
         ↓
 DISPATCHER WORKER — dispatcher container
-Polls SQLite outbox approximately every 0.5 seconds:
+Polls PostgreSQL outbox approximately every 0.5 seconds:
   SELECT * FROM outbox
   WHERE done IS NULL AND (sent IS NULL OR sent < :now_minus_1200_seconds)
   ORDER BY created LIMIT 100;
@@ -1228,7 +1233,7 @@ Finds REACTION-21 and sends this SQS radio-live-reactions message body:
   {id: REACTION-21, play_id: PLAY-A, listener: LISTENER-A,
    emoji: "🔥", accepted: T1, ends: T_END, track_id: TRACK-A,
    artists: ["Buzzy Boys"], genre: "hip-hop", album_id: "ia-onmp163"}
-Then updates SQLite outbox REACTION-21: sent=T2, done=null.
+Then updates PostgreSQL outbox REACTION-21: sent=T2, done=null.
 Message attributes include event_id, genre and artist.
         ↓
 REACTION CONSUMER — reactions container
@@ -1236,7 +1241,7 @@ Already long-polling SQS: it receives EVERY reaction, not only reaction 21.
 Receiving the message is what causes it to process REACTION-21.
 Loads the trusted reactions.metadata by event ID; marks processed:1 once:
   UPDATE reactions SET processed=1 WHERE id='REACTION-21';
-SQLite reactions now contains separate rows (not one row with a count column):
+PostgreSQL reactions now contains separate rows (not one row with a count column):
   id             play_id   emoji   processed
   REACTION-1     PLAY-A    🔥      1
   ...            ...      ...     ...
@@ -1248,12 +1253,12 @@ Then executes:
 Result: 21 (assuming 20 other reactions for PLAY-A were processed).
 Inserting/processing a new reaction row makes COUNT(*) increase from 20 to 21.
         ↓
-Threshold check inside this same consumer, not a SQLite database trigger:
+Threshold check inside this same consumer, not a PostgreSQL database trigger:
   count > THRESHOLD (default 20)
   AND reaction accepted before track end
   AND PLAY-A is still the active music broadcast when processed
         ↓
-INSERT OR IGNORE a NEW SQLite outbox record:
+INSERT OR IGNORE a NEW PostgreSQL outbox record:
   {id: "boost:PLAY-A", queue: "priority-downloads",
    body: {kind: "boost", artists: ["Buzzy Boys"], genre: "hip-hop",
           album_id: "ia-onmp163", exclude: TRACK-A},
@@ -1275,7 +1280,7 @@ download plan yet. The next worker creates the jobs row.
         ↓
 PRIORITY-DOWNLOAD CONSUMER — downloads container
 downloads.plan_job() first checks jobs.id = "boost:PLAY-A".
-If no saved plan, reads local SQLite tracks:
+If no saved plan, reads local PostgreSQL tracks:
   SELECT * FROM tracks
   WHERE status IN ('available','ready')
     AND id NOT IN (SELECT track_id FROM playlist);
@@ -1283,11 +1288,11 @@ Python excludes active/source tracks and checks catalog/source/cap conditions.
 Randomly selects another same-artist OR same-album candidate;
 if that pool is empty, falls back to the source genre.
 Example selection: TRACK-B = “Eva Jinek's dream” by Oilboy's aftersun.
-The selected catalog row already exists in SQLite tracks:
+The selected catalog row already exists in PostgreSQL tracks:
   {id: TRACK-B, status: "available", source: "https://source.example/audio.mp3",
    metadata: {id: TRACK-B, title: "Eva Jinek's dream",
               artists: ["Oilboy's aftersun"], genre: "hip-hop", ...}, ...}
-Saves SQLite jobs:
+Saves PostgreSQL jobs:
   {id: "boost:PLAY-A", done: 0,
    body: {kind: "boost", tracks: [TRACK-B], completed: []}}
         ↓
@@ -1296,8 +1301,8 @@ Reads tracks.source and metadata; validates source/rights and fetches audio.
 A ready track reuses downloaded audio. A new fetch becomes downloading → ready.
         ↓
 SUCCESS PATH (failure branch below)
-SQLite jobs.body.completed = [TRACK-B], jobs.done = 1
-SQLite playlist: {position: 501, track_id: TRACK-B, priority: 1}
+PostgreSQL jobs.body.completed = [TRACK-B], jobs.done = 1
+PostgreSQL playlist: {position: 501, track_id: TRACK-B, priority: 1}
   (unless already represented by a pending/playing listener request)
 Redis: fulfill_genre() removes hip-hop from radio:genres, saves a cutoff,
        and publishes genre_fulfilled; later reactions can build a new score.
@@ -1324,14 +1329,14 @@ station always performs that check before playback.
 ```text
 PRIORITY-DOWNLOAD CONSUMER attempts TRACK-B → ValueError
         ↓
-SQLite failed_downloads:
+PostgreSQL failed_downloads:
   {id: FAILURE-1, job_id: "boost:PLAY-A", track_id: TRACK-B, kind: "boost",
    source_url: "https://source.example/audio.mp3",
    page_url: "https://source.example/album", error_type: "ValueError",
    error_detail: "Unsupported provider host", created: T_FAIL,
    replacement_id: null}
-SQLite tracks: TRACK-B status:"failed", error:"ValueError" (if not already ready)
-SQLite outbox:
+PostgreSQL tracks: TRACK-B status:"failed", error:"ValueError" (if not already ready)
+PostgreSQL outbox:
   {id: "failed-download:FAILURE-1", queue: "download-failures",
    body: {failure_id: FAILURE-1, job_id: "boost:PLAY-A", track_id: TRACK-B,
           kind: "boost", source_url: "https://source.example/audio.mp3",
@@ -1339,7 +1344,7 @@ SQLite outbox:
           error_detail: "Unsupported provider host"}, sent: null, done: null, ...}
         ↓
 SAME PRIORITY-DOWNLOAD CONSUMER — download_failures.alternative()
-Reads local SQLite tracks, filters same genre, rights/cap and policy eligibility;
+Reads local PostgreSQL tracks, filters same genre, rights/cap and policy eligibility;
 excludes failed/planned/source tracks, playlist and pending/playing requests.
 Randomly picks TRACK-C = “Don't get me down” (example cached replacement).
 Updates failed_downloads.replacement_id = TRACK-C.
@@ -1355,7 +1360,7 @@ On success: completed:[TRACK-C], done:1 → playlist → genre fulfillment → a
 Separately, DISPATCHER sends the failure outbox body with
 id:"failed-download:FAILURE-1" to SQS radio-live-download-failures.
 It marks that archive outbox record sent/done after successful delivery.
-Admin reads SQLite failed_downloads to show URLs, errors and replacement details.
+Admin reads PostgreSQL failed_downloads to show URLs, errors and replacement details.
 ```
 
 The failure archive queue has 14-day retention and no download consumer. It is
@@ -1370,7 +1375,7 @@ jobs:   {id:"boost:PLAY-A", done:1,
 outbox: {id:"boost:PLAY-A", done:T_DONE,
          failed:"Download failed; no eligible replacement completed", ...}
 SQS:    original download message acknowledged/deleted
-Redis:  unfulfilled genre score retained; SQLite reactions also retained
+Redis:  unfulfilled genre score retained; PostgreSQL reactions also retained
 ```
 
 That terminal job does not automatically wait for a same-genre crawl or revive
@@ -1404,13 +1409,13 @@ Browser → POST /api/requests (listener session cookie)
   {request_id: REQUEST-1, mode:"auto", query:"I'm stressed; help me unwind"}
         ↓
 API container — requests.submit() → rag.submit()
-Reads local SQLite tracks (catalog metadata, source/rights and availability).
+Reads local PostgreSQL tracks (catalog metadata, source/rights and availability).
 Reads this listener's last 8 requests and rag_pending confirmation state.
 Records rag_turns: {id:REQUEST-1, listener:LISTENER-A, created:T1, busy:1}.
         ↓
 RAG retrieval — rag.retrieve()
 Builds documents from title, artists, album, genre and genre-associated mood words.
-Uses cached SQLite rag_embeddings:
+Uses cached PostgreSQL rag_embeddings:
   {track_id:TRACK-D, model:"text-embedding-3-small:256",
    digest:"<document hash>", vector:[<256 numbers>]}
 Embeds missing/changed documents in bounded batches and embeds the query.
@@ -1424,12 +1429,12 @@ Example structured AI decision:
    genres:["ambient","jazz"],
    reply:"Would ambient or jazz suit your mood?"}
 Server validates catalog IDs/genres; a mood suggestion does not authorize a fetch.
-SQLite requests:
+PostgreSQL requests:
   {sequence:100, id:REQUEST-1, listener:LISTENER-A,
    query:"I'm stressed; help me unwind", track_id:null,
    status:"awaiting_confirmation", suggestions:["ambient","jazz"],
    response:"Would ambient or jazz suit your mood?", engine:"rag", ...}
-SQLite rag_pending:
+PostgreSQL rag_pending:
   {listener:LISTENER-A, genres:["ambient","jazz"], track_ids:[]}
 No download outbox row or SQS message yet. rag_turns.busy returns to 0.
         ↓
@@ -1448,7 +1453,7 @@ Otherwise chooses least recently played/requested; ties randomize artist group
 then track. It does not simply pick the first ambient SQL row.
 Example selected metadata: TRACK-D, title:"Quiet Evening", genre:"ambient".
         ↓
-API commits SQLite request + outbox together:
+API commits PostgreSQL request + outbox together:
   requests:
     {sequence:101, id:REQUEST-2, listener:LISTENER-A, query:"ambient",
      mode:"auto", track_id:TRACK-D, requested_genre:"ambient",
@@ -1466,7 +1471,7 @@ SQS radio-live-request-downloads:
    track_id:TRACK-D, request_id:REQUEST-2}
         ↓
 REQUEST-DOWNLOAD CONSUMER — downloads container
-The API already chose the track; the consumer saves that choice in SQLite jobs:
+The API already chose the track; the consumer saves that choice in PostgreSQL jobs:
   {id:"request:REQUEST-2", done:0,
    body:{kind:"request", tracks:[TRACK-D], completed:[]}}
 Downloads TRACK-D or reuses ready audio; updates completed:[TRACK-D], done:1.
@@ -1500,7 +1505,7 @@ uses its local mood/genre rules and `conversations` state instead of this RAG fl
 
 Both flows feed the same public view: `GET /api/status` supplies the initial
 snapshot, and `GET /api/events` supplies SSE updates and periodic status snapshots.
-Redis reaction events animate the community pulse. SQLite-backed views supply
+Redis reaction events animate the community pulse. PostgreSQL-backed views supply
 request/download status, selected titles and broadcast times. `GET /api/requests`
 supplies the current listener's private chat history; public request activity is
 shared with other listeners through the station views.
@@ -1582,11 +1587,11 @@ drain deadline. Pages loaded before the reconnection change need one refresh to
 receive the updated player. Tuning out cancels scheduled reconnection attempts.
 
 Both API slots mount the same `radio-data` volume and use the same session secret,
-Redis, SQS, and media configuration. SQLite still has one writer at a time. API
+Redis, SQS, and media configuration. PostgreSQL still has one writer at a time. API
 startup performs normal database initialization; schema changes must remain
 compatible with the old application during overlap and rollback. Application
 rollback does not undo database migrations. This workflow is for a **single Docker
-host**, not a distributed SQLite deployment.
+host**, not a distributed PostgreSQL deployment.
 
 After adopting this workflow, use the script for API releases instead of an
 unqualified `docker compose up -d --build`, which can recreate services outside

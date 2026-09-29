@@ -13,13 +13,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import fakeredis
 import uvicorn
 from playwright.sync_api import sync_playwright
+from app.testing import database
 from app import db, events
 from app.api import app
 from app.library import album_ref
 
 
 def main():
-    with tempfile.TemporaryDirectory(prefix='rwx-accounts-') as tmp:
+    with database(), tempfile.TemporaryDirectory(prefix='rwx-accounts-') as tmp:
         db.DATA=Path(tmp);db.init();events.r=fakeredis.FakeRedis(decode_responses=True)
         audio=db.DATA/'audio';audio.mkdir();path=audio/'sample.mp3'
         # Chrome sniffs the synthetic WAV fixture; production recordings are MP3.
@@ -29,7 +30,7 @@ def main():
         with db.transaction() as c:
             for i in range(2):
                 meta={'id':f'test-{i}','title':f'Test song {i+1}','artists':['Test artist'],'album':'Test album','album_id':'test-album','genre':'jazz'}
-                c.execute('INSERT INTO tracks(id,metadata,status,source,rights,path,duration) VALUES(?,?,?,?,?,?,?)',(meta['id'],json.dumps(meta),'ready','https://example.com/audio','test fixture',str(path),4))
+                c.execute('INSERT INTO tracks(id,metadata,status,source,rights,path,duration) VALUES(%s,%s,%s,%s,%s,%s,%s)',(meta['id'],json.dumps(meta),'ready','https://example.com/audio','test fixture',str(path),4))
         album=album_ref(meta)['id']
         sock=socket.socket();sock.bind(('127.0.0.1',0));port=sock.getsockname()[1]
         server=uvicorn.Server(uvicorn.Config(app,log_level='error'))

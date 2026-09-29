@@ -119,12 +119,12 @@ def cached(meta, requested=False):
     key = cache_key(meta, requested)
     column='requested_intro_id' if requested else 'intro_id'
     with db.connect() as c:
-        row=c.execute(f'SELECT a.* FROM tracks t JOIN announcements a ON a.id=t.{column} WHERE t.id=?',(meta['id'],)).fetchone()
+        row=c.execute(f'SELECT a.* FROM tracks t JOIN announcements a ON a.id=t.{column} WHERE t.id=%s',(meta['id'],)).fetchone()
         if row and Path(row['path']).is_file():return dict(row)
         # Adopt existing speech on upgrade; age alone never requires regeneration.
-        row = c.execute('SELECT * FROM announcements WHERE id=?',(key,)).fetchone()
+        row = c.execute('SELECT * FROM announcements WHERE id=%s',(key,)).fetchone()
         if row and Path(row['path']).is_file():
-            c.execute(f'UPDATE tracks SET {column}=? WHERE id=?',(row['id'],meta['id']))
+            c.execute(f'UPDATE tracks SET {column}=%s WHERE id=%s',(row['id'],meta['id']))
             return dict(row)
     return None
 
@@ -162,10 +162,10 @@ def prepare(meta, requested=False):
         if not 0<duration<=60: raise ValueError('Invalid introduction duration')
         temporary.replace(final)
         with db.transaction() as c:
-            c.execute('INSERT OR REPLACE INTO announcements VALUES(?,?,?,?,?,?,?,?)',
+            c.execute('INSERT INTO announcements VALUES(%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT(id) DO UPDATE SET track_id=excluded.track_id,script=excluded.script,details=excluded.details,path=excluded.path,duration=excluded.duration,created=excluded.created,voice=excluded.voice',
                       (key,meta['id'],text,json.dumps(details),str(final),duration,time.time(),os.getenv('ANNOUNCER_VOICE','onyx')))
             column='requested_intro_id' if requested else 'intro_id'
-            c.execute(f'UPDATE tracks SET {column}=? WHERE id=?',(key,meta['id']))
+            c.execute(f'UPDATE tracks SET {column}=%s WHERE id=%s',(key,meta['id']))
         return cached(meta,requested)
     except Exception as error:
         log.warning('Introduction unavailable for %s: %s',meta['id'],type(error).__name__)
@@ -185,7 +185,7 @@ def prepare_upcoming_once():
         play=now_playing(c,now)
         announcement=on_air(c,now)
         if announcement:
-            reserved=c.execute('SELECT ends FROM plays WHERE id=?',(announcement['play_id'],)).fetchone()
+            reserved=c.execute('SELECT ends FROM plays WHERE id=%s',(announcement['play_id'],)).fetchone()
             at=reserved['ends'] if reserved else now
         else:at=play['ends'] if play else now
         history=[dict(p,metadata=json.loads(p['metadata'])) for p in c.execute('SELECT * FROM plays ORDER BY starts')]

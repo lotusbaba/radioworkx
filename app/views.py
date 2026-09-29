@@ -8,7 +8,7 @@ from app.requests import head, ordered_pending
 
 
 def broadcast_times(c, play_id):
-    row=c.execute('SELECT starts,ends,actual_end FROM plays WHERE id=?',(play_id,)).fetchone()
+    row=c.execute('SELECT starts,ends,actual_end FROM plays WHERE id=%s',(play_id,)).fetchone()
     intro=json.loads(db.setting(c,'announcement_on_air','null'))
     if not row or row['starts']>time.time() or (row['actual_end'] is not None and row['actual_end']<=row['starts']) or (intro and intro.get('play_id')==play_id):
         return {'played_at':None,'finished_at':None}
@@ -25,7 +25,7 @@ def playlist_views(c, play, now):
         meta=json.loads(row['metadata'])
         label=('Downloading' if row['status']=='downloading' else 'Waiting for download' if row['status']!='ready' else
                'Waiting for artist / album limits' if not eligible(meta,history,when) else 'Ready')
-        owner=c.execute('SELECT listener,created FROM requests WHERE id=?',(row['request_id'],)).fetchone()
+        owner=c.execute('SELECT listener,created FROM requests WHERE id=%s',(row['request_id'],)).fetchone()
         requests.append({'metadata':meta,'duration':row['duration'],'status':label if label=='Ready' else 'Deferred · '+label,
                          'requested_by':'Listener '+hashlib.sha256(owner['listener'].encode()).hexdigest()[:6],'requested_at':owner['created']})
     community=[]
@@ -45,7 +45,7 @@ def playlist_views(c, play, now):
             continue
         for id in plan['tracks']:
             if id in plan.get('completed',[]) or id in plan.get('failed',[]):continue
-            row=c.execute('SELECT metadata,status,error FROM tracks WHERE id=?',(id,)).fetchone()
+            row=c.execute('SELECT metadata,status,error FROM tracks WHERE id=%s',(id,)).fetchone()
             if row:
                 downloads.append({'job_id':job['id'],'kind':request['kind'],'metadata':json.loads(row['metadata']),
                                   'status':'Retry pending' if row['error'] else 'Downloading' if row['status']=='downloading' else 'Queued'})
@@ -61,11 +61,11 @@ def acquisition_views(c, play, now):
     """Keep completed work visible without representing it as pending downloads."""
     automatic=c.execute('SELECT COUNT(*) FROM playlist').fetchone()[0]
     remaining=automatic+bool(play)
-    active=c.execute("SELECT COUNT(*) FROM outbox WHERE queue='downloads' AND done IS NULL AND json_extract(body,'$.kind')='refill'").fetchone()[0]
+    active=c.execute("SELECT COUNT(*) FROM outbox WHERE queue='downloads' AND done IS NULL AND (body::jsonb ->> 'kind')='refill'").fetchone()[0]
     capped=db.setting(c,'download_cap_reached','0')=='1'
     last=float(db.setting(c,'last_refill','0'))
     wait=max(0,int(60-(now-last)))
-    recovering=c.execute("SELECT 1 FROM outbox WHERE done IS NULL AND json_extract(body,'$.kind')='recovery'").fetchone()
+    recovering=c.execute("SELECT 1 FROM outbox WHERE done IS NULL AND (body::jsonb ->> 'kind')='recovery'").fetchone()
     if recovering:
         summary='No eligible queued music: discovering and downloading new tracks now.'
     elif capped:
@@ -88,7 +88,7 @@ def acquisition_views(c, play, now):
         if not plan['tracks'] and job['done']:
             activity.append({'job_id':job['id'],'kind':request['kind'],'metadata':None,'label':f"Requested genre: {request['discover_genre']}" if request.get('discover_genre') else 'Recovery search completed','status':'Catalog checked for eligible genre alternatives' if request.get('discover_genre') else 'No matching authorized tracks'})
         for track_id in reversed(plan.get('completed',[])):
-            row=c.execute('SELECT metadata,downloaded_at FROM tracks WHERE id=?',(track_id,)).fetchone()
+            row=c.execute('SELECT metadata,downloaded_at FROM tracks WHERE id=%s',(track_id,)).fetchone()
             if not row:continue
             label=('Downloaded' if row['downloaded_at'] is not None and row['downloaded_at']>=job['created'] else 'Reused from library')
             activity.append({'job_id':job['id'],'kind':request['kind'],'metadata':json.loads(row['metadata']),'status':label})
@@ -99,17 +99,17 @@ def acquisition_views(c, play, now):
 
 
 def reaction_followup(c):
-    job=c.execute("SELECT o.id,o.body,o.created,o.done,o.failed,j.body AS plan FROM outbox o LEFT JOIN jobs j ON j.id=o.id WHERE o.queue='priority-downloads' AND json_extract(o.body,'$.kind')='boost' ORDER BY o.created DESC LIMIT 1").fetchone()
+    job=c.execute("SELECT o.id,o.body,o.created,o.done,o.failed,j.body AS plan FROM outbox o LEFT JOIN jobs j ON j.id=o.id WHERE o.queue='priority-downloads' AND (o.body::jsonb ->> 'kind')='boost' ORDER BY o.created DESC LIMIT 1").fetchone()
     if not job:return None
     event=json.loads(job['body'])
-    source=c.execute('SELECT metadata FROM tracks WHERE id=?',(event.get('exclude'),)).fetchone()
+    source=c.execute('SELECT metadata FROM tracks WHERE id=%s',(event.get('exclude'),)).fetchone()
     plan=json.loads(job['plan']) if job['plan'] else None
     target=None
     label='Selecting a follow-up'
     if plan and plan['tracks']:
         targets=plan.get('completed',[])[-1:] or [t for t in plan['tracks'] if t not in plan.get('failed',[])] or plan['tracks'][-1:]
         target_id=targets[0]
-        target=c.execute('SELECT metadata,status,error,downloaded_at FROM tracks WHERE id=?',(target_id,)).fetchone()
+        target=c.execute('SELECT metadata,status,error,downloaded_at FROM tracks WHERE id=%s',(target_id,)).fetchone()
         if target_id in plan.get('completed',[]):
             label='Downloaded' if target and target['downloaded_at'] is not None and target['downloaded_at']>=job['created'] else 'Reused from library'
         elif target:
@@ -122,7 +122,7 @@ def reaction_followup(c):
         # Report this track's first broadcast after the fetch was fulfilled, not
         # an older play or an unproven causal link to this particular boost job.
         since=max(job['created'],target['downloaded_at'] or 0)
-        for played in c.execute('SELECT id FROM plays WHERE track_id=? AND starts>=? ORDER BY starts',(target_id,since)):
+        for played in c.execute('SELECT id FROM plays WHERE track_id=%s AND starts>=%s ORDER BY starts',(target_id,since)):
             candidate_times=broadcast_times(c,played['id'])
             if candidate_times['played_at'] is not None:
                 target_times=candidate_times;break
@@ -137,7 +137,7 @@ def next_airtime(c, now):
     from app.config import DEMO
     from app.policy import WINDOW
     history=[dict(p,metadata=json.loads(p['metadata'])) for p in c.execute(
-        'SELECT * FROM plays WHERE ends>? OR id IN (SELECT id FROM plays ORDER BY starts DESC LIMIT 3) ORDER BY starts',(now-WINDOW,))]
+        'SELECT * FROM plays WHERE ends>%s OR id IN (SELECT id FROM plays ORDER BY starts DESC LIMIT 3) ORDER BY starts',(now-WINDOW,))]
     rows=c.execute("SELECT * FROM tracks WHERE status='ready'").fetchall()
     tracks=[json.loads(row['metadata']) for row in rows if bool(json.loads(row['metadata']).get('demo'))==DEMO]
     for at in sorted({now}|{p['ends']+WINDOW for p in history if p['ends']+WINDOW>now}):
@@ -150,20 +150,22 @@ def download_page(c, page=1, page_size=10, automatic=False):
     query="""
     WITH entries AS (
       SELECT o.id AS job_id,o.created,o.done,o.failed,
-        json_extract(o.body,'$.kind') AS kind,
-        json_extract(o.body,'$.discover_genre') AS genre,
+        o.body::jsonb ->> 'kind' AS kind,
+        o.body::jsonb ->> 'discover_genre' AS genre,
         t.metadata,t.status AS track_status,t.error,t.downloaded_at,
         x.value AS track_id,
-        EXISTS(SELECT 1 FROM json_each(j.body,'$.completed') z WHERE z.value=x.value) AS completed
+        EXISTS(SELECT 1 FROM jsonb_array_elements_text(j.body::jsonb -> 'completed') z(value)
+          WHERE z.value=x.value) AS completed
       FROM outbox o LEFT JOIN jobs j ON j.id=o.id
-      LEFT JOIN json_each(CASE WHEN j.body IS NOT NULL THEN json_extract(j.body,'$.tracks')
-        WHEN json_extract(o.body,'$.track_id') IS NOT NULL THEN json_array(json_extract(o.body,'$.track_id'))
-        ELSE '[]' END) x
+      LEFT JOIN LATERAL jsonb_array_elements_text(
+        CASE WHEN j.body IS NOT NULL THEN j.body::jsonb -> 'tracks'
+        WHEN o.body::jsonb ->> 'track_id' IS NOT NULL THEN jsonb_build_array(o.body::jsonb ->> 'track_id')
+        ELSE '[]'::jsonb END) x(value) ON true
       LEFT JOIN tracks t ON t.id=x.value
       WHERE o.queue IN ('downloads','priority-downloads','request-downloads')
     ), timed AS (
       SELECT *,CASE WHEN completed AND downloaded_at>=created THEN downloaded_at
-        WHEN completed THEN COALESCE(done,created) ELSE COALESCE(done,created) END AS updated_at,
+        ELSE COALESCE(done,created) END AS updated_at,
         ROW_NUMBER() OVER (PARTITION BY CASE WHEN track_id IS NULL THEN kind ELSE job_id||':'||track_id END ORDER BY created DESC,job_id DESC) AS diagnostic_rank
       FROM entries
     ), visible AS (SELECT * FROM timed WHERE track_id IS NOT NULL OR diagnostic_rank=1)
@@ -172,7 +174,7 @@ def download_page(c, page=1, page_size=10, automatic=False):
     total=c.execute(query+'SELECT COUNT(*) FROM visible'+condition).fetchone()[0]
     pages=max(1,(total+page_size-1)//page_size)
     page=min(page,pages)
-    rows=c.execute(query+'SELECT * FROM visible'+condition+' ORDER BY updated_at DESC,job_id DESC,track_id DESC LIMIT ? OFFSET ?',
+    rows=c.execute(query+'SELECT * FROM visible'+condition+' ORDER BY updated_at DESC,job_id DESC,track_id DESC LIMIT %s OFFSET %s',
                    (page_size,(page-1)*page_size))
     items=[]
     for row in rows:
@@ -195,7 +197,7 @@ def community_request_page(c, page=1, page_size=10):
     pages=max(1,(total+page_size-1)//page_size)
     page=min(page,pages)
     rows=c.execute('SELECT r.id,r.listener,r.created,r.status,r.play_id,t.metadata'+source+
-                   ' ORDER BY r.created DESC,r.sequence DESC LIMIT ? OFFSET ?',(page_size,(page-1)*page_size))
+                   ' ORDER BY r.created DESC,r.sequence DESC LIMIT %s OFFSET %s',(page_size,(page-1)*page_size))
     items=[dict(request_id=row['id'],metadata=json.loads(row['metadata']),requested_at=row['created'],
                 **broadcast_times(c,row['play_id']),
                 requested_by='Listener '+hashlib.sha256(row['listener'].encode()).hexdigest()[:6],

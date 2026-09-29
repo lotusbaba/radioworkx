@@ -46,11 +46,11 @@ def reconcile_fulfilled_genres():
     from app import db
     latest={}
     with db.connect() as c:
-        rows=c.execute("SELECT o.id,o.body,o.done,j.body AS plan FROM outbox o JOIN jobs j ON j.id=o.id WHERE o.done IS NOT NULL AND o.failed IS NULL AND json_extract(o.body,'$.kind') IN ('boost','request') ORDER BY o.done")
+        rows=c.execute("SELECT o.id,o.body,o.done,j.body AS plan FROM outbox o JOIN jobs j ON j.id=o.id WHERE o.done IS NOT NULL AND o.failed IS NULL AND (o.body::jsonb ->> 'kind') IN ('boost','request') ORDER BY o.done")
         for row in rows:
             event=json.loads(row['body']);plan=json.loads(row['plan'])
             for track_id in plan.get('completed',[]):
-                track=c.execute('SELECT metadata FROM tracks WHERE id=?',(track_id,)).fetchone()
+                track=c.execute('SELECT metadata FROM tracks WHERE id=%s',(track_id,)).fetchone()
                 if not track:continue
                 genre=event.get('genre') or json.loads(track[0])['genre']
                 latest[genre]=(row['done'],row['id']+':'+track_id)
@@ -64,7 +64,7 @@ def reconcile_fulfilled_genres():
                     current=float(pipe.hget('radio:genre-cleared-at',genre) or -1)
                     if pipe.sismember('radio:fulfilled-fetches',marker) or current>=cutoff:break
                     with db.connect() as c:
-                        ids=[row[0] for row in c.execute("SELECT id FROM reactions WHERE json_extract(metadata,'$.genre')=? AND accepted>?",(genre,cutoff))]
+                        ids=[row[0] for row in c.execute("SELECT id FROM reactions WHERE (metadata::jsonb ->> 'genre')=%s AND accepted>%s",(genre,cutoff))]
                     count=sum(bool(pipe.sismember('radio:projected',id)) for id in ids)
                     pipe.multi()
                     if count:pipe.zadd('radio:genres',{genre:count})

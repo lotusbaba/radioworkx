@@ -1,6 +1,6 @@
 # RadioWorkx — AI Radio
 
-RadioWorkx is a shared live-radio website built with FastAPI, SQLite, Redis, LocalStack SQS/S3, FFmpeg, and a vanilla browser frontend. It broadcasts licensed independent music, accepts conversational catalog requests, responds to listener reactions, and exposes operational activity through Elasticsearch/Kibana and OpenSearch Dashboards.
+RadioWorkx is a shared live-radio website built with FastAPI, PostgreSQL, Redis, LocalStack SQS/S3, FFmpeg, and a vanilla browser frontend. It broadcasts licensed independent music, accepts conversational catalog requests, responds to listener reactions, and exposes operational activity through Elasticsearch/Kibana and OpenSearch Dashboards.
 
 The live station is currently available at [radioworkx.tail060b33.ts.net](https://radioworkx.tail060b33.ts.net/).
 
@@ -12,17 +12,17 @@ The live station is currently available at [radioworkx.tail060b33.ts.net](https:
 - Acquires only allowlisted, explicitly authorized recordings and stops permanently at 10,000 downloaded tracks.
 - Provides searchable artist and album pages with separate personal playback.
 - Supports email/password accounts, private liked tracks, and personal playlists with sequential playback at `/my-music`.
-- Uses a durable SQLite outbox and LocalStack SQS workers for reactions, downloads, crawling, and artwork processing.
+- Uses a durable PostgreSQL outbox and LocalStack SQS workers for reactions, downloads, crawling, and artwork processing.
 - Records privacy-limited activity in both Elasticsearch/Kibana and OpenSearch Dashboards.
 - Supports proxy-based API deployments with connection draining and rollback.
 
 ## Run locally
 
-Requirements: Docker Desktop or Docker Engine with Compose v2.
+Requirements: Docker Desktop or Docker Engine with Compose v2, and a dedicated PostgreSQL database. Existing installations must follow [the PostgreSQL migration guide](docs/POSTGRES_MIGRATION.md) before deploying this version.
 
 ```sh
 cp .env.example .env
-# Set SESSION_SECRET in .env to a long random value.
+# Set SESSION_SECRET and DATABASE_URL in .env (see the migration guide).
 docker compose up -d --build
 ```
 
@@ -42,7 +42,7 @@ The active local installation uses `RADIO_DATA_DIR=/data/live`, Redis database 1
 
 ```text
 Listener → Tailscale Funnel → Nginx → FastAPI
-                                      ├→ SQLite / audio library
+                                      ├→ PostgreSQL + media volume
                                       ├→ durable outbox → LocalStack SQS → workers
                                       └→ Redis → SSE and live MP3
 
@@ -60,6 +60,8 @@ The complete architecture, requirements, data flows, endpoint behavior, scheduli
 Use the project virtual environment:
 
 ```sh
+docker compose -f compose.test.yaml up -d --wait
+export TEST_DATABASE_URL=postgresql://radioworkx_test:local-test-only@127.0.0.1:55432/radioworkx_test
 .venv/bin/python -m pytest -q
 .venv/bin/python scripts/browser_smoke.py --url http://127.0.0.1:8001 --read-only --audio-check --allow-autoplay
 ```
@@ -91,6 +93,8 @@ These endpoints are bound to loopback and are not public station URLs.
 
 ## Documentation
 
+- [PostgreSQL migration](docs/POSTGRES_MIGRATION.md) — configuration, verified data import, coordinated cutover, rollback, and isolated tests.
+
 - [Station audio architecture](docs/STATION_AUDIO_ARCHITECTURE.md) — Python processes and threads, FFmpeg subprocesses and stdout pipes, Redis audio chunks, API delivery, and announcement state.
 - [System design and operations](docs/SYSTEM_DESIGN.md) — full behavioral specification, architecture, APIs, deployment procedures, and observability setup.
 - [RAG chat architecture](docs/RAG_CHAT_ARCHITECTURE.md) — embeddings, hybrid retrieval, pending confirmations, structured output, validation, rate limits, and fallback behavior.
@@ -110,6 +114,6 @@ The additive schema is initialized by the API on startup and preserves station h
 
 - Keep `.env`, `.admin-credentials`, runtime databases, and downloaded media out of Git.
 - Do not expose Redis, LocalStack, Elasticsearch, OpenSearch, Kibana, or OpenSearch Dashboards publicly.
-- Back up `radio-data` and `redis-data` together, and preserve the analytics volumes when their history matters.
+- Back up PostgreSQL, `radio-data`, and `redis-data` together, and preserve the analytics volumes when their history matters.
 - Browser autoplay may require a user gesture; the application cannot bypass browser policy.
 - Licensing, reporting, and public-operation obligations require review beyond the scheduling controls implemented here.

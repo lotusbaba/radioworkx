@@ -27,23 +27,23 @@ with httpx.Client(base_url=base,timeout=10) as c:
     deadline=time.monotonic()+20
     while time.monotonic()<deadline:
         with db.connect() as sql:
-            job=sql.execute('SELECT * FROM outbox WHERE id=?',('boost:'+play['id'],)).fetchone()
+            job=sql.execute('SELECT * FROM outbox WHERE id=%s',('boost:'+play['id'],)).fetchone()
         if job and job['done']:
             break
         time.sleep(.25)
     assert job and job['done'] and not job['failed'],dict(job) if job else 'Missing threshold job'
     assert float(r.zscore('radio:genres',genre)) >= before+21
     with db.connect() as sql:
-        plan=json.loads(sql.execute('SELECT body FROM jobs WHERE id=?',('boost:'+play['id'],)).fetchone()[0])
+        plan=json.loads(sql.execute('SELECT body FROM jobs WHERE id=%s',('boost:'+play['id'],)).fetchone()[0])
         assert len(plan['completed'])==1,plan
-        source=sql.execute('SELECT metadata FROM tracks WHERE id=?',(plan['completed'][0],)).fetchone()[0]
+        source=sql.execute('SELECT metadata FROM tracks WHERE id=%s',(plan['completed'][0],)).fetchone()[0]
         source=json.loads(source)
         assert set(source['artists']) & set(play['metadata']['artists']) or source['album_id']==play['metadata']['album_id']
-        first=sql.execute("SELECT body FROM jobs WHERE json_extract(body,'$.kind')='refill' ORDER BY rowid LIMIT 1").fetchone()
+        first=sql.execute("SELECT body FROM jobs WHERE (body::jsonb ->> 'kind')='refill' ORDER BY id LIMIT 1").fetchone()
         # Earlier empty authorized-catalog attempts may exist; inspect first populated refill.
-        plans=[json.loads(row[0]) for row in sql.execute("SELECT body FROM jobs WHERE json_extract(body,'$.kind')='refill'")]
+        plans=[json.loads(row[0]) for row in sql.execute("SELECT body FROM jobs WHERE (body::jsonb ->> 'kind')='refill'")]
         batch=next(p for p in plans if len(p['tracks'])==10)
-        metas=[json.loads(sql.execute('SELECT metadata FROM tracks WHERE id=?',(id,)).fetchone()[0]) for id in batch['tracks']]
+        metas=[json.loads(sql.execute('SELECT metadata FROM tracks WHERE id=%s',(id,)).fetchone()[0]) for id in batch['tracks']]
         assert len({m['genre'] for m in metas})==10
         assert len({a for m in metas for a in m['artists']})==10
     assert any(fields['kind']=='reaction' for _,fields in r.xrevrange('radio:events',count=100))

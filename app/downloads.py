@@ -18,7 +18,7 @@ def bootstrap():
     from app.catalog import import_catalog
     import_catalog('catalog/bandcamp.json',overwrite=False)
     with db.transaction() as c:
-        c.execute("DELETE FROM playlist WHERE track_id IN (SELECT id FROM tracks WHERE COALESCE(json_extract(metadata,'$.demo'),0) != ?)",(int(DEMO),))
+        c.execute("DELETE FROM playlist WHERE track_id IN (SELECT id FROM tracks WHERE COALESCE((metadata::jsonb ->> 'demo')::boolean,false) != %s)",(DEMO,))
     if not DEMO:
         return
     genres = ['ambient','punk','soul','folk','techno','jazz','afrobeat','electronica','hip-hop','doom metal']
@@ -29,7 +29,7 @@ def bootstrap():
             meta = dict(id=f'demo-{i:03}',title=f'Test transmission {i+1:02}',artists=[artist],
                         album=f'Synthetic Sessions {i//20+1}',album_id=f'demo-album-{i}',
                         genre=g,bandcamp_url=None,compilation_id=None,demo=True)
-            c.execute('INSERT OR IGNORE INTO tracks(id,metadata,source,rights) VALUES(?,?,?,?)',
+            c.execute('INSERT INTO tracks(id,metadata,source,rights) VALUES(%s,%s,%s,%s) ON CONFLICT DO NOTHING',
                       (meta['id'],json.dumps(meta),'demo://'+str(i),'Locally synthesized test tone; no artist recording'))
 
 
@@ -44,8 +44,8 @@ def plan_job(event):
     if event['kind']=='refill':return plan_refill(event)
     if event.get('discover_genre'):
         with db.connect() as c:
-            existing=c.execute('SELECT body,done FROM jobs WHERE id=?',(event['id'],)).fetchone()
-            request=c.execute("SELECT 1 FROM requests WHERE id=? AND status='pending'",(event['request_id'],)).fetchone()
+            existing=c.execute('SELECT body,done FROM jobs WHERE id=%s',(event['id'],)).fetchone()
+            request=c.execute("SELECT 1 FROM requests WHERE id=%s AND status='pending'",(event['request_id'],)).fetchone()
         if existing: return json.loads(existing['body']),bool(existing['done'])
         if request:
             from app.discovery import discover
@@ -54,15 +54,15 @@ def plan_job(event):
             from app.requests import refresh_genre_head
             if request: refresh_genre_head(c,time.time())
             plan={'tracks':[],'kind':'request','completed':[]}
-            c.execute('INSERT OR IGNORE INTO jobs(id,body) VALUES(?,?)',(event['id'],json.dumps(plan)))
+            c.execute('INSERT INTO jobs(id,body) VALUES(%s,%s) ON CONFLICT DO NOTHING',(event['id'],json.dumps(plan)))
         return plan,False
     if event['kind']=='recovery':
         with db.transaction() as c:
-            exists=c.execute('SELECT 1 FROM jobs WHERE id=?',(event['id'],)).fetchone()
+            exists=c.execute('SELECT 1 FROM jobs WHERE id=%s',(event['id'],)).fetchone()
             capped=library_only(c)
             now=time.time()
             history=[dict(p,metadata=json.loads(p['metadata'])) for p in c.execute(
-                'SELECT * FROM plays WHERE ends>? OR id IN (SELECT id FROM plays ORDER BY starts DESC LIMIT 3) ORDER BY starts',(now-WINDOW,))]
+                'SELECT * FROM plays WHERE ends>%s OR id IN (SELECT id FROM plays ORDER BY starts DESC LIMIT 3) ORDER BY starts',(now-WINDOW,))]
             fresh_eligible=any(eligible(json.loads(t['metadata']),history,now) for t in c.execute(
                 "SELECT metadata FROM tracks WHERE status='available' AND source IS NOT NULL AND rights IS NOT NULL "
                 "AND id NOT IN (SELECT track_id FROM playlist) AND id NOT IN (SELECT track_id FROM requests WHERE status='pending')"))
@@ -70,16 +70,16 @@ def plan_job(event):
             from app.discovery import discover
             discover()
     with db.transaction() as c:
-        row = c.execute('SELECT body,done FROM jobs WHERE id=?',(event['id'],)).fetchone()
+        row = c.execute('SELECT body,done FROM jobs WHERE id=%s',(event['id'],)).fetchone()
         if row:
             return json.loads(row['body']), bool(row['done'])
         if event['kind'] in {'request','listen'}:
             plan = {'tracks':[event['track_id']],'kind':event['kind'],'completed':[]}
-            c.execute('INSERT INTO jobs(id,body) VALUES(?,?)',(event['id'],json.dumps(plan)))
+            c.execute('INSERT INTO jobs(id,body) VALUES(%s,%s)',(event['id'],json.dumps(plan)))
             return plan, False
         capped = library_only(c)
         rows = c.execute("SELECT * FROM tracks WHERE status IN ('available','ready') AND id NOT IN (SELECT track_id FROM playlist)").fetchall()
-        active = c.execute('SELECT track_id FROM plays WHERE actual_end IS NULL AND ends>?',(time.time(),)).fetchall()
+        active = c.execute('SELECT track_id FROM plays WHERE actual_end IS NULL AND ends>%s',(time.time(),)).fetchall()
         excluded = {x[0] for x in active} | {event.get('exclude')}
         candidates = []
         fresh = []
@@ -95,7 +95,7 @@ def plan_job(event):
         if event['kind']=='recovery':
             now=time.time()
             history=[dict(p,metadata=json.loads(p['metadata'])) for p in c.execute(
-                'SELECT * FROM plays WHERE ends>? OR id IN (SELECT id FROM plays ORDER BY starts DESC LIMIT 3) ORDER BY starts',(now-WINDOW,))]
+                'SELECT * FROM plays WHERE ends>%s OR id IN (SELECT id FROM plays ORDER BY starts DESC LIMIT 3) ORDER BY starts',(now-WINDOW,))]
             requested={r[0] for r in c.execute("SELECT track_id FROM requests WHERE status='pending'")}
             pool=[t for t in fresh if t['id'] not in requested and eligible(t,history,now)]
             random.shuffle(pool)
@@ -115,7 +115,7 @@ def plan_job(event):
         else:
             selected = diverse_sample(fresh) or diverse_sample(candidates)
         plan = {'tracks':[t['id'] for t in selected],'kind':event['kind'],'completed':[]}
-        c.execute('INSERT INTO jobs(id,body) VALUES(?,?)',(event['id'],json.dumps(plan)))
+        c.execute('INSERT INTO jobs(id,body) VALUES(%s,%s)',(event['id'],json.dumps(plan)))
         if not selected:
             db.set_setting(c,'download_status','No eligible new tracks in reviewed sources; discovery will retry' if event['kind']=='recovery' else 'Waiting for a diverse authorized catalog' if event['kind'] != 'boost' else 'No authorized follow-up available')
         return plan, False
@@ -127,7 +127,7 @@ class TrackReserved(RuntimeError):
 
 def reserve(track_id):
     with db.transaction() as c:
-        row = c.execute('SELECT * FROM tracks WHERE id=?',(track_id,)).fetchone()
+        row = c.execute('SELECT * FROM tracks WHERE id=%s',(track_id,)).fetchone()
         if row is None or row['status']=='failed':
             raise ValueError('Track is quarantined after a failed download')
         if row['status'] == 'ready':
@@ -139,7 +139,7 @@ def reserve(track_id):
             return None
         if row['status'] == 'downloading':
             raise TrackReserved('Track already reserved')
-        c.execute("UPDATE tracks SET status='downloading',error=NULL WHERE id=?",(track_id,))
+        c.execute("UPDATE tracks SET status='downloading',error=NULL WHERE id=%s",(track_id,))
         return dict(row)
 
 
@@ -230,7 +230,7 @@ def acquire(track_id):
             raise ValueError('Invalid audio duration')
         partial.replace(final)
         with db.transaction() as c:
-            c.execute("UPDATE tracks SET status='ready',path=?,duration=?,downloaded_at=?,error=NULL WHERE id=?",
+            c.execute("UPDATE tracks SET status='ready',path=%s,duration=%s,downloaded_at=%s,error=NULL WHERE id=%s",
                       (str(final),duration,time.time(),track_id))
             library_only(c)
             from app.hosts import completed
@@ -242,7 +242,7 @@ def acquire(track_id):
         partial.unlink(missing_ok=True)
         with db.transaction() as c:
             # Do not persist source URLs or HTTP exceptions (signed URLs may contain secrets).
-            c.execute("UPDATE tracks SET status='available',error=? WHERE id=?",(type(error).__name__,track_id))
+            c.execute("UPDATE tracks SET status='available',error=%s WHERE id=%s",(type(error).__name__,track_id))
             db.set_setting(c,'download_status',f'Download failed for {track_id}: {type(error).__name__}')
         raise
 
@@ -257,15 +257,15 @@ def process_job(event):
         try:
             if acquire(track_id):
                 with db.transaction() as c:
-                    requested = c.execute("SELECT 1 FROM requests WHERE track_id=? AND status IN ('pending','playing')",(track_id,)).fetchone()
+                    requested = c.execute("SELECT 1 FROM requests WHERE track_id=%s AND status IN ('pending','playing')",(track_id,)).fetchone()
                     if plan['kind'] not in {'request','listen'} and not requested:
-                        c.execute('INSERT OR IGNORE INTO playlist(track_id,priority) VALUES(?,?)',
+                        c.execute('INSERT INTO playlist(track_id,priority) VALUES(%s,%s) ON CONFLICT DO NOTHING',
                                   (track_id,1 if plan['kind'] in {'boost','recovery'} else 0))
                     plan.setdefault('completed',[]).append(track_id)
-                    c.execute('UPDATE jobs SET body=? WHERE id=?',(json.dumps(plan),event['id']))
+                    c.execute('UPDATE jobs SET body=%s WHERE id=%s',(json.dumps(plan),event['id']))
             elif plan['kind'] == 'request':
                 with db.transaction() as c:
-                    c.execute("UPDATE requests SET status='failed',response=response || ' Download unavailable: the library limit has been reached.' WHERE id=? AND status='pending'",(event['request_id'],))
+                    c.execute("UPDATE requests SET status='failed',response=response || ' Download unavailable: the library limit has been reached.' WHERE id=%s AND status='pending'",(event['request_id'],))
         except TrackReserved:
             raise  # Another consumer is acquiring this recording; retry without quarantining it.
         except Exception as error:
@@ -277,13 +277,13 @@ def process_job(event):
                 replacement=alternative(c,event,plan,meta)
                 if replacement:
                     plan['tracks'].append(replacement)
-                    c.execute('UPDATE failed_downloads SET replacement_id=? WHERE id=?',(replacement,failure_id))
+                    c.execute('UPDATE failed_downloads SET replacement_id=%s WHERE id=%s',(replacement,failure_id))
                 if plan['kind']=='request':
                     if replacement:
-                        c.execute("UPDATE requests SET track_id=?,response=response || ' Selecting another track in the requested genre after a download failure.' WHERE id=? AND status='pending'",(replacement,event.get('request_id')))
+                        c.execute("UPDATE requests SET track_id=%s,response=response || ' Selecting another track in the requested genre after a download failure.' WHERE id=%s AND status='pending'",(replacement,event.get('request_id')))
                     else:
-                        c.execute("UPDATE requests SET status='failed',response=response || ' Download failed; please choose another track.' WHERE id=? AND status='pending'",(event.get('request_id'),))
-                c.execute('UPDATE jobs SET body=? WHERE id=?',(json.dumps(plan),event['id']))
+                        c.execute("UPDATE requests SET status='failed',response=response || ' Download failed; please choose another track.' WHERE id=%s AND status='pending'",(event.get('request_id'),))
+                c.execute('UPDATE jobs SET body=%s WHERE id=%s',(json.dumps(plan),event['id']))
     if plan['kind']=='listen':
         from app import telemetry
         telemetry.emit('preparation.completed' if plan.get('completed') else 'preparation.failed',job_id=event['id'],track_id=event['track_id'],outcome='success' if plan.get('completed') else 'failure')
@@ -291,23 +291,23 @@ def process_job(event):
         from app.events import fulfill_genre
         for track_id in plan.get('completed',[]):
             with db.connect() as c:
-                meta=json.loads(c.execute('SELECT metadata FROM tracks WHERE id=?',(track_id,)).fetchone()[0])
+                meta=json.loads(c.execute('SELECT metadata FROM tracks WHERE id=%s',(track_id,)).fetchone()[0])
             fulfill_genre(event['id'],track_id,event.get('genre',meta['genre']))
     with db.transaction() as c:
-        c.execute('UPDATE jobs SET done=1 WHERE id=?',(event['id'],))
+        c.execute('UPDATE jobs SET done=1 WHERE id=%s',(event['id'],))
         if plan.get('failed') and not plan.get('completed'):
-            c.execute("UPDATE outbox SET failed='Download failed; no eligible replacement completed' WHERE id=?",(event['id'],))
+            c.execute("UPDATE outbox SET failed='Download failed; no eligible replacement completed' WHERE id=%s",(event['id'],))
 
 
 def plan_refill(event):
-    # Never hold SQLite's writer lock while searching artist/genre combinations.
+    # Never hold the business transaction lock while searching artist/genre combinations.
     with db.transaction() as c:
-        existing=c.execute('SELECT body,done FROM jobs WHERE id=?',(event['id'],)).fetchone()
+        existing=c.execute('SELECT body,done FROM jobs WHERE id=%s',(event['id'],)).fetchone()
         if existing:return json.loads(existing['body']),bool(existing['done'])
         capped=library_only(c)
         rows=c.execute("SELECT * FROM tracks WHERE status IN ('available','ready') AND id NOT IN (SELECT track_id FROM playlist)").fetchall()
-        active={r[0] for r in c.execute('SELECT track_id FROM plays WHERE actual_end IS NULL AND ends>?',(time.time(),))}
-        history=c.execute("SELECT track_id,json_extract(metadata,'$.genre') AS genre,COUNT(*) AS n,MAX(starts) AS last FROM plays WHERE starts<=? AND (actual_end IS NULL OR actual_end>starts) GROUP BY track_id,json_extract(metadata,'$.genre')",(time.time(),)).fetchall()
+        active={r[0] for r in c.execute('SELECT track_id FROM plays WHERE actual_end IS NULL AND ends>%s',(time.time(),))}
+        history=c.execute("SELECT track_id,(metadata::jsonb ->> 'genre') AS genre,COUNT(*) AS n,MAX(starts) AS last FROM plays WHERE starts<=%s AND (actual_end IS NULL OR actual_end>starts) GROUP BY track_id,(metadata::jsonb ->> 'genre')",(time.time(),)).fetchall()
         counts={};last_played={};genre_last={}
         for play in history:
             counts[play['track_id']]=counts.get(play['track_id'],0)+play['n']
@@ -323,8 +323,8 @@ def plan_refill(event):
     selected=balanced_sample(candidates,{t['id'] for t in fresh},counts,last_played,genre_last)
     plan={'tracks':[t['id'] for t in selected],'kind':'refill','completed':[]}
     with db.transaction() as c:
-        existing=c.execute('SELECT body,done FROM jobs WHERE id=?',(event['id'],)).fetchone()
+        existing=c.execute('SELECT body,done FROM jobs WHERE id=%s',(event['id'],)).fetchone()
         if existing:return json.loads(existing['body']),bool(existing['done'])
-        c.execute('INSERT INTO jobs(id,body) VALUES(?,?)',(event['id'],json.dumps(plan)))
+        c.execute('INSERT INTO jobs(id,body) VALUES(%s,%s)',(event['id'],json.dumps(plan)))
         if not selected:db.set_setting(c,'download_status','Waiting for a diverse authorized catalog')
     return plan,False

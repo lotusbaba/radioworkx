@@ -9,9 +9,9 @@ from app.downloads import process_job
 def track(metadata, id, ready=True):
     m={**metadata,'id':id,'title':id,'artists':['Artist '+id],'album_id':id}
     with db.transaction() as c:
-        c.execute('INSERT INTO tracks(id,metadata,status,duration,path,source,rights) VALUES(?,?,?,?,?,?,?)',
+        c.execute('INSERT INTO tracks(id,metadata,status,duration,path,source,rights) VALUES(%s,%s,%s,%s,%s,%s,%s)',
                   (id,json.dumps(m),'ready' if ready else 'available',100,id+'.mp3','https://example.org/a','CC BY'))
-        if ready:c.execute('INSERT INTO playlist(track_id) VALUES(?)',(id,))
+        if ready:c.execute('INSERT INTO playlist(track_id) VALUES(%s)',(id,))
     return m
 
 
@@ -38,7 +38,7 @@ def test_unready_request_does_not_block_ready_request(metadata,monkeypatch):
     with db.connect() as c:
         row=c.execute("SELECT * FROM outbox WHERE queue='request-downloads'").fetchone()
     def acquire(id):
-        with db.transaction() as c:c.execute("UPDATE tracks SET status='ready' WHERE id=?",(id,))
+        with db.transaction() as c:c.execute("UPDATE tracks SET status='ready' WHERE id=%s",(id,))
         return True
     monkeypatch.setattr('app.downloads.acquire',acquire)
     event={'id':row['id'],**json.loads(row['body'])}
@@ -60,7 +60,7 @@ def test_policy_blocked_head_moves_behind_eligible_requests(metadata):
     ask('first');ask('second')
     with db.transaction() as c:
         for i in range(2):
-            c.execute('INSERT INTO plays(id,track_id,metadata,starts,ends) VALUES(?,?,?,?,?)',(str(i),'first',json.dumps(first),i*100,i*100+90))
+            c.execute('INSERT INTO plays(id,track_id,metadata,starts,ends) VALUES(%s,%s,%s,%s,%s)',(str(i),'first',json.dumps(first),i*100,i*100+90))
     from app.views import playlist_views
     with db.connect() as c:
         view=playlist_views(c,None,500)
@@ -153,7 +153,7 @@ def test_genre_selects_eligible_undownloaded_alternative(metadata):
     now=time.time()
     with db.transaction() as c:
         for i in range(3):
-            c.execute('INSERT INTO plays(id,track_id,metadata,starts,ends) VALUES(?,?,?,?,?)',
+            c.execute('INSERT INTO plays(id,track_id,metadata,starts,ends) VALUES(%s,%s,%s,%s,%s)',
                       (str(i),'blocked',json.dumps(blocked),now-600+i*100,now-510+i*100))
     result=ask('jazz')
     assert result['track_id']=='fresh'
@@ -171,16 +171,16 @@ def test_blocked_genre_replacement_keeps_fifo(metadata):
     later=ask('later')
     with db.transaction() as c:
         for i in range(3):
-            c.execute('INSERT INTO plays(id,track_id,metadata,starts,ends) VALUES(?,?,?,?,?)',
+            c.execute('INSERT INTO plays(id,track_id,metadata,starts,ends) VALUES(%s,%s,%s,%s,%s)',
                       (str(i),'first',json.dumps(first),i*100,i*100+90))
     assert select_next(500)[0]['track_id']=='later'
     with db.connect() as c:
         pending=c.execute("SELECT id,track_id FROM requests WHERE status='pending' ORDER BY sequence").fetchall()
         assert [(r['id'],r['track_id']) for r in pending]==[(request['id'],'fresh')]
-        assert c.execute("SELECT COUNT(*) FROM outbox WHERE json_extract(body,'$.track_id')='fresh'").fetchone()[0]==1
+        assert c.execute("SELECT COUNT(*) FROM outbox WHERE (body::jsonb ->> 'track_id')='fresh'").fetchone()[0]==1
     select_next(501)
     with db.connect() as c:
-        assert c.execute("SELECT COUNT(*) FROM outbox WHERE json_extract(body,'$.track_id')='fresh'").fetchone()[0]==1
+        assert c.execute("SELECT COUNT(*) FROM outbox WHERE (body::jsonb ->> 'track_id')='fresh'").fetchone()[0]==1
 
 
 def test_blocked_genre_discovers_then_schedules_new_album(metadata,monkeypatch):
@@ -190,11 +190,11 @@ def test_blocked_genre_discovers_then_schedules_new_album(metadata,monkeypatch):
     request=ask('jazz')
     with db.transaction() as c:
         for i in range(3):
-            c.execute('INSERT INTO plays(id,track_id,metadata,starts,ends) VALUES(?,?,?,?,?)',
+            c.execute('INSERT INTO plays(id,track_id,metadata,starts,ends) VALUES(%s,%s,%s,%s,%s)',
                       (str(i),'first',json.dumps(first),i*100,i*100+90))
         refresh_genre_head(c,1000)
         refresh_genre_head(c,1001)
-        rows=c.execute("SELECT * FROM outbox WHERE json_extract(body,'$.discover_genre')='jazz'").fetchall()
+        rows=c.execute("SELECT * FROM outbox WHERE (body::jsonb ->> 'discover_genre')='jazz'").fetchall()
         assert len(rows)==1
     calls=[]
     def discover(genre):
@@ -206,6 +206,6 @@ def test_blocked_genre_discovers_then_schedules_new_album(metadata,monkeypatch):
     plan_job(event);plan_job(event)
     assert calls==['jazz']
     with db.connect() as c:
-        row=c.execute('SELECT * FROM requests WHERE id=?',(request['id'],)).fetchone()
+        row=c.execute('SELECT * FROM requests WHERE id=%s',(request['id'],)).fetchone()
         assert row['track_id']=='new album track' and row['status']=='pending'
-        assert c.execute("SELECT COUNT(*) FROM outbox WHERE json_extract(body,'$.track_id')='new album track'").fetchone()[0]==1
+        assert c.execute("SELECT COUNT(*) FROM outbox WHERE (body::jsonb ->> 'track_id')='new album track'").fetchone()[0]==1

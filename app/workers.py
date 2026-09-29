@@ -33,14 +33,14 @@ def dispatch_once():
         schedule(c)
     with db.connect() as c:
         # Re-send until completion, so an emulator restart cannot silently lose jobs.
-        rows = c.execute('SELECT * FROM outbox WHERE done IS NULL AND (sent IS NULL OR sent<?) '
+        rows = c.execute('SELECT * FROM outbox WHERE done IS NULL AND (sent IS NULL OR sent<%s) '
                          'ORDER BY created LIMIT 100',(time.time()-1200,)).fetchall()
     for row in rows:
         queues.send(row['queue'],row['id'],json.loads(row['body']))
         with db.transaction() as c:
-            c.execute('UPDATE outbox SET sent=? WHERE id=?',(time.time(),row['id']))
+            c.execute('UPDATE outbox SET sent=%s WHERE id=%s',(time.time(),row['id']))
             if row['queue']=='download-failures':
-                c.execute('UPDATE outbox SET done=? WHERE id=?',(time.time(),row['id']))
+                c.execute('UPDATE outbox SET done=%s WHERE id=%s',(time.time(),row['id']))
     return len(rows)
 
 
@@ -76,7 +76,7 @@ def consume_once(name, wait=10):
             telemetry.emit('job.received',job_id=event.get('id'),queue=name,attempt=int(message.get('Attributes',{}).get('ApproximateReceiveCount',1)))
             if int(message.get('Attributes',{}).get('ApproximateReceiveCount',1))>1:telemetry.emit('job.retried',job_id=event.get('id'),queue=name)
             with db.connect() as c:
-                finished=c.execute('SELECT done FROM outbox WHERE id=?',(event['id'],)).fetchone()
+                finished=c.execute('SELECT done FROM outbox WHERE id=%s',(event['id'],)).fetchone()
             if finished and finished['done'] is not None:
                 queues.client().delete_message(QueueUrl=url,ReceiptHandle=message['ReceiptHandle'])
                 continue
@@ -93,7 +93,7 @@ def consume_once(name, wait=10):
                     from app.downloads import process_job
                     process_job(event)
             with db.transaction() as c:
-                c.execute('UPDATE outbox SET done=? WHERE id=?',(time.time(),event['id']))
+                c.execute('UPDATE outbox SET done=%s WHERE id=%s',(time.time(),event['id']))
             queues.client().delete_message(QueueUrl=url,ReceiptHandle=message['ReceiptHandle'])
         except Exception as error:
             # No ack: SQS retries then moves repeatedly failing messages to the DLQ.
@@ -102,8 +102,8 @@ def consume_once(name, wait=10):
                 with db.transaction() as c:
                     event = json.loads(message['Body'])
                     if event.get('kind') == 'request' and not event.get('discover_genre'):
-                        c.execute("UPDATE requests SET status='failed',response=response || ' The download failed after repeated attempts; please try another track.' WHERE id=? AND status='pending'",(event.get('request_id'),))
-                    c.execute('UPDATE outbox SET done=?,failed=? WHERE id=?',
+                        c.execute("UPDATE requests SET status='failed',response=response || ' The download failed after repeated attempts; please try another track.' WHERE id=%s AND status='pending'",(event.get('request_id'),))
+                    c.execute('UPDATE outbox SET done=%s,failed=%s WHERE id=%s',
                               (time.time(),type(error).__name__,json.loads(message['Body']).get('id')))
             queues.queue.cache_clear()
     return len(messages)
@@ -127,7 +127,7 @@ def main():
     telemetry.emit('service.started')
     db.init()
     # Locks live on the shared volume, work across processes/containers, and release on crash.
-    # SQLite transactions additionally serialize all capacity and history decisions.
+    # PostgreSQL advisory transaction locks additionally serialize all capacity and history decisions.
     with (DATA / f'{name}.lock').open('w') as lock:
         fcntl.flock(lock,fcntl.LOCK_EX | fcntl.LOCK_NB)
         if name == 'station':

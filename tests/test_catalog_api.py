@@ -10,7 +10,7 @@ def seed(metadata):
     with db.transaction() as c:
         for tid,genre,status,source in [('a','jazz','ready',None),('b','funk','available','private-download'),('c','jazz','available',None)]:
             meta={**metadata,'id':tid,'title':'Song '+tid,'genre':genre,'artists':[tid],'album_id':tid}
-            c.execute('INSERT INTO tracks(id,metadata,status,source,rights,duration,path) VALUES(?,?,?,?,?,100,?)',(tid,json.dumps(meta),status,source,'private-permission' if source else None,tid+'.mp3'))
+            c.execute('INSERT INTO tracks(id,metadata,status,source,rights,duration,path) VALUES(%s,%s,%s,%s,%s,100,%s)',(tid,json.dumps(meta),status,source,'private-permission' if source else None,tid+'.mp3'))
 
 
 def test_genre_selection_pagination_and_privacy(metadata):
@@ -39,7 +39,7 @@ def test_exact_queue_session_fifo_idempotence_and_download(metadata):
     assert client.post('/api/queue',json={'track_id':'a'}).status_code==202
     with db.connect() as c:
         assert [r[0] for r in c.execute('SELECT track_id FROM requests ORDER BY sequence')]==['b','a']
-        event=c.execute('SELECT body FROM outbox WHERE id=?',('request:'+rid,)).fetchone()[0]
+        event=c.execute('SELECT body FROM outbox WHERE id=%s',('request:'+rid,)).fetchone()[0]
         assert json.loads(event)['track_id']=='b'
     # A download still pending never blocks a later ready request.
     assert select_next()[0]['track_id']=='a'

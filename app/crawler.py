@@ -75,7 +75,7 @@ def add_url(c,url,genre=None,depth=0,origin=None):
     except ValueError:return
     hosts.register(c,host,origin=origin or url)
     if c.execute('SELECT COUNT(*) FROM crawl_frontier').fetchone()[0]>=5000:return
-    c.execute('INSERT OR IGNORE INTO crawl_frontier(url,provider,genre,depth,discovered_from) VALUES(?,?,?,?,?)',
+    c.execute('INSERT INTO crawl_frontier(url,provider,genre,depth,discovered_from) VALUES(%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING',
               (url,'bandcamp',genre,depth,origin))
 
 
@@ -160,11 +160,11 @@ def archive_discover(genre=None):
 def process(event):
     from app.downloads import library_only
     with db.transaction() as c:
-        row=c.execute('SELECT finished FROM crawl_runs WHERE id=?',(event['id'],)).fetchone()
+        row=c.execute('SELECT finished FROM crawl_runs WHERE id=%s',(event['id'],)).fetchone()
         if row and row['finished']:return
         if library_only(c):return
         hosts.bootstrap(c)
-        c.execute('INSERT OR IGNORE INTO crawl_runs(id,started) VALUES(?,?)',(event['id'],time.time()))
+        c.execute('INSERT INTO crawl_runs(id,started) VALUES(%s,%s) ON CONFLICT DO NOTHING',(event['id'],time.time()))
         for feed in json.loads(Path('catalog/discovery-feeds.json').read_text()):
             add_url(c,feed['url'],feed['genre'],origin='seed feed')
         for row in c.execute('SELECT metadata FROM tracks WHERE source IS NOT NULL LIMIT 30').fetchall():
@@ -178,10 +178,10 @@ def process(event):
     for _ in range(budget):
         with db.transaction() as c:
             if library_only(c):break
-            row=c.execute('SELECT * FROM crawl_frontier WHERE next_attempt<=? ORDER BY CASE WHEN genre=? THEN 0 ELSE 1 END,next_attempt,depth DESC LIMIT 1',
+            row=c.execute('SELECT * FROM crawl_frontier WHERE next_attempt<=%s ORDER BY CASE WHEN genre=%s THEN 0 ELSE 1 END,next_attempt,depth DESC LIMIT 1',
                           (time.time(),event.get('genre'))).fetchone()
             if not row:break
-            c.execute("UPDATE crawl_frontier SET next_attempt=?,status='fetching' WHERE url=?",(time.time()+86400,row['url']))
+            c.execute("UPDATE crawl_frontier SET next_attempt=%s,status='fetching' WHERE url=%s",(time.time()+86400,row['url']))
         try:
             if not permitted(row['url']):raise ValueError('Robots restriction or host cooldown')
             document=fetch(row['url']);pages+=1
@@ -194,18 +194,18 @@ def process(event):
             try:items=bandcamp_tracks(document,row['url'],row['genre'])
             except (ValueError,KeyError):items=[]
             added+=import_items(items)
-            with db.transaction() as c:c.execute("UPDATE crawl_frontier SET status=?,error=NULL WHERE url=?",('licensed' if items else 'no_eligible_tracks',row['url']))
+            with db.transaction() as c:c.execute('UPDATE crawl_frontier SET status=%s,error=NULL WHERE url=%s',('licensed' if items else 'no_eligible_tracks',row['url']))
         except Exception as error:
             errors+=1
-            with db.transaction() as c:c.execute("UPDATE crawl_frontier SET status='deferred',error=? WHERE url=?",(type(error).__name__,row['url']))
+            with db.transaction() as c:c.execute("UPDATE crawl_frontier SET status='deferred',error=%s WHERE url=%s",(type(error).__name__,row['url']))
         time.sleep(2)
     with db.transaction() as c:
-        c.execute('UPDATE crawl_runs SET finished=?,pages=pages+?,tracks=tracks+?,errors=errors+? WHERE id=?',(time.time(),pages,added,errors,event['id']))
+        c.execute('UPDATE crawl_runs SET finished=%s,pages=pages+%s,tracks=tracks+%s,errors=errors+%s WHERE id=%s',(time.time(),pages,added,errors,event['id']))
         from app.requests import refresh_genre_head
         refresh_genre_head(c,time.time())
         if added and not library_only(c):
             from app.station import needs_recovery
-            if needs_recovery(c,time.time()) and not c.execute("SELECT 1 FROM outbox WHERE done IS NULL AND json_extract(body,'$.kind')='recovery'").fetchone():
+            if needs_recovery(c,time.time()) and not c.execute("SELECT 1 FROM outbox WHERE done IS NULL AND (body::jsonb ->> 'kind')='recovery'").fetchone():
                 db.emit(c,'recovery:'+str(uuid.uuid4()),'priority-downloads',{'kind':'recovery'})
                 db.set_setting(c,'last_recovery',time.time())
         db.set_setting(c,'crawler_status',f'Checked {pages} Bandcamp pages; added {added} tracks; {errors} deferred sources')

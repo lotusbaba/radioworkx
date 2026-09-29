@@ -8,10 +8,10 @@ def seed(metadata):
     with db.transaction() as c:
         for tid in ['bad','good']:
             m={**metadata,'id':tid,'artists':[tid],'album_id':tid}
-            c.execute("INSERT INTO tracks(id,metadata,status,source,rights) VALUES(?,?,'available','https://private.example/audio.mp3','licensed')",(tid,json.dumps(m)))
+            c.execute("INSERT INTO tracks(id,metadata,status,source,rights) VALUES(%s,%s,'available','https://private.example/audio.mp3','licensed')",(tid,json.dumps(m)))
         event={'id':'boost:test','kind':'boost','genre':'jazz','artists':['original'],'album_id':'original'}
         db.emit(c,event['id'],'priority-downloads',event)
-        c.execute('INSERT INTO jobs(id,body) VALUES(?,?)',(event['id'],json.dumps({'kind':'boost','tracks':['bad'],'completed':[]})))
+        c.execute('INSERT INTO jobs(id,body) VALUES(%s,%s)',(event['id'],json.dumps({'kind':'boost','tracks':['bad'],'completed':[]})))
     return event
 
 
@@ -49,7 +49,7 @@ def test_all_replacements_fail_job_finishes_and_keeps_demand(metadata,monkeypatc
     with db.connect() as c:
         assert c.execute('SELECT done FROM jobs').fetchone()[0]==1
         assert c.execute('SELECT COUNT(*) FROM failed_downloads').fetchone()[0]==2
-        assert c.execute('SELECT failed FROM outbox WHERE id=?',(event['id'],)).fetchone()[0]
+        assert c.execute('SELECT failed FROM outbox WHERE id=%s',(event['id'],)).fetchone()[0]
     assert isolated.zscore('radio:genres','jazz')==28
 
 
@@ -58,7 +58,7 @@ def test_replacements_bounded_and_wrong_genre_excluded(metadata,monkeypatch):
     with db.transaction() as c:
         for n in range(8):
             tid=str(n);m={**metadata,'id':tid,'genre':'jazz' if n<7 else 'folk','artists':[tid],'album_id':tid}
-            c.execute("INSERT INTO tracks(id,metadata,status,source,rights) VALUES(?,?,'available','https://example.org/a','licensed')",(tid,json.dumps(m)))
+            c.execute("INSERT INTO tracks(id,metadata,status,source,rights) VALUES(%s,%s,'available','https://example.org/a','licensed')",(tid,json.dumps(m)))
     calls=[]
     def fail(tid):calls.append(tid);raise ValueError('Invalid duration')
     monkeypatch.setattr(downloads,'acquire',fail)

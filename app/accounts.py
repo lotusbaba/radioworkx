@@ -4,7 +4,6 @@ import hmac
 import os
 import re
 import secrets
-import sqlite3
 import time
 import uuid
 from urllib.parse import urlparse
@@ -42,7 +41,7 @@ def same_site(request: Request):
 def current_user(request: Request):
     token = request.cookies.get(COOKIE, '')
     with db.connect() as c:
-        row = c.execute('SELECT u.id,u.email FROM users u JOIN user_sessions s ON s.user_id=u.id WHERE s.digest=? AND s.expires>?',
+        row = c.execute('SELECT u.id,u.email FROM users u JOIN user_sessions s ON s.user_id=u.id WHERE s.digest=%s AND s.expires>%s',
                         (digest(token), time.time())).fetchone()
     if not row:
         raise HTTPException(401, 'Sign in to save your music.')
@@ -57,21 +56,21 @@ def throttle(request, email):
             ('global', 300)]
     limited = False
     with db.transaction() as c:
-        c.execute('DELETE FROM account_attempts WHERE created<?', (now-900,))
+        c.execute('DELETE FROM account_attempts WHERE created<%s', (now-900,))
         for key, limit in keys:
-            if c.execute('SELECT COUNT(*) FROM account_attempts WHERE bucket=?', (key,)).fetchone()[0] >= limit:
+            if c.execute('SELECT COUNT(*) FROM account_attempts WHERE bucket=%s', (key,)).fetchone()[0] >= limit:
                 limited = True
         if not limited:
-            c.executemany('INSERT INTO account_attempts VALUES(?,?)', [(key, now) for key, _ in keys])
+            c.cursor().executemany('INSERT INTO account_attempts VALUES(%s,%s)', [(key, now) for key, _ in keys])
     if limited:
         raise HTTPException(429, 'Too many sign-in attempts. Please try again in 15 minutes.')
 
 
 def issue_session(c, user_id, request, response):
     token = secrets.token_urlsafe(32)
-    c.execute('DELETE FROM user_sessions WHERE expires<? OR digest=?',
+    c.execute('DELETE FROM user_sessions WHERE expires<%s OR digest=%s',
               (time.time(), digest(request.cookies.get(COOKIE, ''))))
-    c.execute('INSERT INTO user_sessions VALUES(?,?,?)', (digest(token), user_id, time.time()+LIFETIME))
+    c.execute('INSERT INTO user_sessions VALUES(%s,%s,%s)', (digest(token), user_id, time.time()+LIFETIME))
     response.set_cookie(COOKIE, token, httponly=True, samesite='strict',
                         secure=request.url.scheme == 'https' or os.getenv('COOKIE_SECURE') == '1', max_age=LIFETIME)
     response.headers['Cache-Control'] = 'no-store'
@@ -112,9 +111,9 @@ def register(body: Credentials, request: Request, response: Response):
     user_id = uuid.uuid4().hex
     try:
         with db.transaction() as c:
-            c.execute('INSERT INTO users VALUES(?,?,?,?)', (user_id, email, encoded, time.time()))
+            c.execute('INSERT INTO users VALUES(%s,%s,%s,%s)', (user_id, email, encoded, time.time()))
             issue_session(c, user_id, request, response)
-    except sqlite3.IntegrityError:
+    except db.IntegrityError:
         raise HTTPException(409, 'Unable to register this email. Try signing in.')
     return {'id': user_id, 'email': email}
 
@@ -124,7 +123,7 @@ def login(body: Credentials, request: Request, response: Response):
     email, password = credentials(body)
     throttle(request, email)
     with db.connect() as c:
-        row = c.execute('SELECT * FROM users WHERE email=?', (email,)).fetchone()
+        row = c.execute('SELECT * FROM users WHERE email=%s', (email,)).fetchone()
     encoded = row['password_hash'] if row else DUMMY_HASH
     valid = hmac.compare_digest(password_hash(password, encoded.split(':')[0]), encoded)
     if not row or not valid:
@@ -137,7 +136,7 @@ def login(body: Credentials, request: Request, response: Response):
 @router.post('/api/account/logout', dependencies=[Depends(same_site)])
 def logout(request: Request, response: Response):
     with db.transaction() as c:
-        c.execute('DELETE FROM user_sessions WHERE digest=?', (digest(request.cookies.get(COOKIE, '')),))
+        c.execute('DELETE FROM user_sessions WHERE digest=%s', (digest(request.cookies.get(COOKIE, '')),))
     response.delete_cookie(COOKIE, httponly=True, samesite='strict')
     response.headers['Cache-Control'] = 'no-store'
     return {'ok': True}
@@ -148,11 +147,11 @@ def music(response: Response, user=Depends(current_user)):
     response.headers['Cache-Control'] = 'no-store'
     with db.connect() as c:
         limit = capped(c)
-        likes = [public_track(r, limit) for r in c.execute('SELECT t.* FROM tracks t JOIN user_likes l ON l.track_id=t.id WHERE l.user_id=? ORDER BY l.created DESC,t.id', (user['id'],))]
-        playlists = [dict(r) for r in c.execute('SELECT id,name FROM user_playlists WHERE user_id=? ORDER BY created,id', (user['id'],))]
+        likes = [public_track(r, limit) for r in c.execute('SELECT t.* FROM tracks t JOIN user_likes l ON l.track_id=t.id WHERE l.user_id=%s ORDER BY l.created DESC,t.id', (user['id'],))]
+        playlists = [dict(r) for r in c.execute('SELECT id,name FROM user_playlists WHERE user_id=%s ORDER BY created,id', (user['id'],))]
         limit = capped(c)
         for playlist in playlists:
-            playlist['tracks'] = [public_track(r, limit) for r in c.execute('SELECT t.* FROM tracks t JOIN user_playlist_tracks p ON p.track_id=t.id WHERE p.playlist_id=? ORDER BY p.position', (playlist['id'],))]
+            playlist['tracks'] = [public_track(r, limit) for r in c.execute('SELECT t.* FROM tracks t JOIN user_playlist_tracks p ON p.track_id=t.id WHERE p.playlist_id=%s ORDER BY p.position', (playlist['id'],))]
     return {'likes': likes, 'playlists': playlists}
 
 
@@ -160,14 +159,14 @@ def music(response: Response, user=Depends(current_user)):
 def like(track_id: str, user=Depends(current_user)):
     with db.transaction() as c:
         track_row(c, track_id)
-        c.execute('INSERT OR IGNORE INTO user_likes VALUES(?,?,?)', (user['id'], track_id, time.time()))
+        c.execute('INSERT INTO user_likes VALUES(%s,%s,%s) ON CONFLICT DO NOTHING', (user['id'], track_id, time.time()))
     return {'ok': True}
 
 
 @router.delete('/api/me/likes/{track_id}', dependencies=[Depends(same_site)])
 def unlike(track_id: str, user=Depends(current_user)):
     with db.transaction() as c:
-        c.execute('DELETE FROM user_likes WHERE user_id=? AND track_id=?', (user['id'], track_id))
+        c.execute('DELETE FROM user_likes WHERE user_id=%s AND track_id=%s', (user['id'], track_id))
     return {'ok': True}
 
 
@@ -183,7 +182,7 @@ def playlist_name(body):
 
 
 def owned(c, playlist_id, user):
-    if not c.execute('SELECT 1 FROM user_playlists WHERE id=? AND user_id=?', (playlist_id, user['id'])).fetchone():
+    if not c.execute('SELECT 1 FROM user_playlists WHERE id=%s AND user_id=%s', (playlist_id, user['id'])).fetchone():
         raise HTTPException(404, 'Playlist not found.')
 
 
@@ -192,9 +191,9 @@ def create_playlist(body: PlaylistName, user=Depends(current_user)):
     name = playlist_name(body)
     pid = uuid.uuid4().hex
     with db.transaction() as c:
-        if c.execute('SELECT COUNT(*) FROM user_playlists WHERE user_id=?', (user['id'],)).fetchone()[0] >= 100:
+        if c.execute('SELECT COUNT(*) FROM user_playlists WHERE user_id=%s', (user['id'],)).fetchone()[0] >= 100:
             raise HTTPException(409, 'You can create up to 100 playlists.')
-        c.execute('INSERT INTO user_playlists VALUES(?,?,?,?)', (pid, user['id'], name, time.time()))
+        c.execute('INSERT INTO user_playlists VALUES(%s,%s,%s,%s)', (pid, user['id'], name, time.time()))
     return {'id': pid, 'name': name, 'tracks': []}
 
 
@@ -203,7 +202,7 @@ def rename_playlist(playlist_id: str, body: PlaylistName, user=Depends(current_u
     name = playlist_name(body)
     with db.transaction() as c:
         owned(c, playlist_id, user)
-        c.execute('UPDATE user_playlists SET name=? WHERE id=?', (name, playlist_id))
+        c.execute('UPDATE user_playlists SET name=%s WHERE id=%s', (name, playlist_id))
     return {'ok': True}
 
 
@@ -211,7 +210,7 @@ def rename_playlist(playlist_id: str, body: PlaylistName, user=Depends(current_u
 def delete_playlist(playlist_id: str, user=Depends(current_user)):
     with db.transaction() as c:
         owned(c, playlist_id, user)
-        c.execute('DELETE FROM user_playlists WHERE id=?', (playlist_id,))
+        c.execute('DELETE FROM user_playlists WHERE id=%s', (playlist_id,))
     return {'ok': True}
 
 
@@ -220,10 +219,10 @@ def add_track(playlist_id: str, track_id: str, user=Depends(current_user)):
     with db.transaction() as c:
         owned(c, playlist_id, user)
         track_row(c, track_id)
-        count = c.execute('SELECT COUNT(*) FROM user_playlist_tracks WHERE playlist_id=?', (playlist_id,)).fetchone()[0]
+        count = c.execute('SELECT COUNT(*) FROM user_playlist_tracks WHERE playlist_id=%s', (playlist_id,)).fetchone()[0]
         if count >= 500:
             raise HTTPException(409, 'A playlist can contain up to 500 tracks.')
-        c.execute('INSERT OR IGNORE INTO user_playlist_tracks(playlist_id,track_id,position) SELECT ?,?,COALESCE(MAX(position),0)+1 FROM user_playlist_tracks WHERE playlist_id=?', (playlist_id, track_id, playlist_id))
+        c.execute('INSERT INTO user_playlist_tracks(playlist_id,track_id,position) SELECT %s,%s,COALESCE(MAX(position),0)+1 FROM user_playlist_tracks WHERE playlist_id=%s ON CONFLICT DO NOTHING', (playlist_id, track_id, playlist_id))
     return {'ok': True}
 
 
@@ -231,5 +230,5 @@ def add_track(playlist_id: str, track_id: str, user=Depends(current_user)):
 def remove_track(playlist_id: str, track_id: str, user=Depends(current_user)):
     with db.transaction() as c:
         owned(c, playlist_id, user)
-        c.execute('DELETE FROM user_playlist_tracks WHERE playlist_id=? AND track_id=?', (playlist_id, track_id))
+        c.execute('DELETE FROM user_playlist_tracks WHERE playlist_id=%s AND track_id=%s', (playlist_id, track_id))
     return {'ok': True}

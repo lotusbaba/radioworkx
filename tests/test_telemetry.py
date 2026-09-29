@@ -1,6 +1,5 @@
 import json
 import queue
-import sqlite3
 import time
 import uuid
 from fastapi.testclient import TestClient
@@ -60,11 +59,12 @@ def test_buffer_overflow_is_nonblocking_and_counted(monkeypatch):
 def test_observer_broadcast_deduplication_and_request_correlation(metadata,monkeypatch):
     events=capture(monkeypatch);now=time.time()
     with db.transaction() as c:
-        c.execute('INSERT INTO tracks(id,metadata) VALUES(?,?)',('track-a',json.dumps(metadata)))
-        c.execute('INSERT INTO plays(id,track_id,metadata,starts,ends,actual_end) VALUES(?,?,?,?,?,?)',('p','track-a',json.dumps(metadata),now-100,now-1,now-1))
-        c.execute("INSERT INTO requests(id,listener,query,mode,response,track_id,status,created,play_id) VALUES('r','private-listener','private query','track','private response','track-a','played',?,'p')",(now-200,))
-    state=sqlite3.connect(':memory:');state.execute('CREATE TABLE settings(key TEXT PRIMARY KEY,value TEXT)');state.execute('INSERT INTO settings VALUES(?,?)',('start',str(now-300)));state.execute('CREATE TABLE seen(id TEXT PRIMARY KEY,created REAL)')
+        c.execute('INSERT INTO tracks(id,metadata) VALUES(%s,%s)',('track-a',json.dumps(metadata)))
+        c.execute('INSERT INTO plays(id,track_id,metadata,starts,ends,actual_end) VALUES(%s,%s,%s,%s,%s,%s)',('p','track-a',json.dumps(metadata),now-100,now-1,now-1))
+        c.execute("INSERT INTO requests(id,listener,query,mode,response,track_id,status,created,play_id) VALUES('r','private-listener','private query','track','private response','track-a','played',%s,'p')",(now-200,))
+    state=db.connect();state.execute('INSERT INTO observer_settings VALUES(%s,%s)',('start',str(now-300)));state.commit()
     observe(state);count=len(events);observe(state)
+    state.close()
     assert len(events)==count
     assert sum(e['event']['action']=='broadcast.started' for e in events)==1
     fulfilled=next(e for e in events if e['event']['action']=='request.fulfilled')

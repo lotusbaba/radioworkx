@@ -19,7 +19,7 @@ def register(email='listener@example.com'):
 def seed(metadata):
     with db.transaction() as c:
         for tid in ['one', 'two']:
-            c.execute('INSERT INTO tracks(id,metadata,status,source,rights) VALUES(?,?,?,?,?)',
+            c.execute('INSERT INTO tracks(id,metadata,status,source,rights) VALUES(%s,%s,%s,%s,%s)',
                       (tid, json.dumps({**metadata, 'id': tid}), 'available', 'https://private.example/audio', 'private rights'))
 
 
@@ -39,7 +39,7 @@ def test_registration_sessions_login_logout_and_expiration():
     a.cookies.clear()
     assert a.post('/api/account/login', json={'email':'listener@example.com','password':'incorrect password'}).status_code == 401
     assert a.post('/api/account/login', json={'email':'LISTENER@example.com','password':PASSWORD}).status_code == 200
-    with db.transaction() as c: c.execute('UPDATE user_sessions SET expires=?', (time.time()-1,))
+    with db.transaction() as c: c.execute('UPDATE user_sessions SET expires=%s', (time.time()-1,))
     assert a.get('/api/account').status_code == 401
 
 
@@ -54,7 +54,7 @@ def test_csrf_cookie_flags_and_rate_limit():
     assert 'HttpOnly' in cookie and 'Secure' in cookie and 'SameSite=strict' in cookie
     with db.transaction() as c:
         from app.accounts import digest
-        c.executemany('INSERT INTO account_attempts VALUES(?,?)', [(digest('email:listener@example.com'),time.time())]*10)
+        c.cursor().executemany('INSERT INTO account_attempts VALUES(%s,%s)', [(digest('email:listener@example.com'),time.time())]*10)
     assert a.post('/api/account/login',json=body,headers=HEADERS).status_code == 429
 
 

@@ -15,7 +15,7 @@ from app.policy import eligible, WINDOW
 def eligible_genre_tracks(c, genre, now=None):
     now = time.time() if now is None else now
     history = [dict(p, metadata=json.loads(p['metadata'])) for p in c.execute(
-        'SELECT * FROM plays WHERE ends>? OR id IN (SELECT id FROM plays ORDER BY starts DESC LIMIT 3) ORDER BY starts', (now-WINDOW,))]
+        'SELECT * FROM plays WHERE ends>%s OR id IN (SELECT id FROM plays ORDER BY starts DESC LIMIT 3) ORDER BY starts', (now-WINDOW,))]
     capped = library_only(c)
     result = []
     for row in c.execute("SELECT * FROM tracks WHERE status IN ('ready','available') AND id NOT IN (SELECT track_id FROM requests WHERE status='pending')"):
@@ -32,9 +32,9 @@ def choose_genre_track(c, genre, now=None):
     choices=eligible_genre_tracks(c,genre,now)
     if not choices:return None
     used={r['track_id']:r['last_used'] for r in c.execute(
-        "SELECT track_id,MAX(at) AS last_used FROM (SELECT track_id,starts AS at FROM plays UNION ALL SELECT track_id,created AS at FROM requests WHERE track_id IS NOT NULL AND status!='failed') GROUP BY track_id")}
+        "SELECT track_id,MAX(at) AS last_used FROM (SELECT track_id,starts AS at FROM plays UNION ALL SELECT track_id,created AS at FROM requests WHERE track_id IS NOT NULL AND status!='failed') AS recent_uses GROUP BY track_id")}
     # Do not choose a currently airing or already pending request track.
-    active={r[0] for r in c.execute('SELECT track_id FROM plays WHERE starts<=? AND ends>? AND actual_end IS NULL',(now,now))}
+    active={r[0] for r in c.execute('SELECT track_id FROM plays WHERE starts<=%s AND ends>%s AND actual_end IS NULL',(now,now))}
     choices=[pair for pair in choices if pair[0]['id'] not in active]
     if not choices:return None
     oldest=min(used.get(row['id'],float('-inf')) for row,_ in choices)
@@ -60,13 +60,13 @@ def refresh_genre_request(c, now, request):
             genre = genre_intent(needle, [])
     if not genre: return
     history = [dict(p, metadata=json.loads(p['metadata'])) for p in c.execute('SELECT * FROM plays ORDER BY starts')]
-    current = c.execute('SELECT metadata FROM tracks WHERE id=?',(request['track_id'],)).fetchone()
+    current = c.execute('SELECT metadata FROM tracks WHERE id=%s',(request['track_id'],)).fetchone()
     if current and eligible(json.loads(current['metadata']), history, now): return
     choice = choose_genre_track(c, genre, now)
     if not choice:
         if library_only(c): return
         key = 'request-discovery:' + request['id']
-        active = c.execute("SELECT 1 FROM outbox WHERE done IS NULL AND json_extract(body,'$.discover_genre')=?",(genre,)).fetchone()
+        active = c.execute("SELECT 1 FROM outbox WHERE done IS NULL AND (body::jsonb ->> 'discover_genre')=%s",(genre,)).fetchone()
         if not active and now-float(db.setting(c,key,'0')) >= 300:
             db.emit(c, key+':'+str(time.time_ns()), 'request-downloads',
                     {'kind':'request','discover_genre':genre,'request_id':request['id']})
@@ -74,9 +74,9 @@ def refresh_genre_request(c, now, request):
         return
     row, meta = choice
     response = f"Selected “{meta['title']}” by {' & '.join(meta['artists'])} for your {genre} request because the previous selection reached a playback limit. Your request keeps its FIFO position."
-    c.execute('UPDATE requests SET track_id=?,response=?,requested_genre=?,sources=? WHERE id=?',
+    c.execute('UPDATE requests SET track_id=%s,response=%s,requested_genre=%s,sources=%s WHERE id=%s',
               (row['id'],response,genre,json.dumps([{k:meta.get(k) for k in ('id','title','bandcamp_url')}]),request['id']))
-    c.execute('DELETE FROM playlist WHERE track_id=?',(row['id'],))
+    c.execute('DELETE FROM playlist WHERE track_id=%s',(row['id'],))
     db.emit(c, 'request:'+request['id']+':replacement:'+str(time.time_ns()), 'request-downloads',
             {'kind':'request','track_id':row['id'],'request_id':request['id']})
 
@@ -127,17 +127,17 @@ def genre_intent(needle, genres):
 
 def offer_genres(c,listener,genres,response):
     choices=genres[:3]
-    c.execute('INSERT INTO conversations VALUES(?,?) ON CONFLICT(listener) DO UPDATE SET genres=excluded.genres',(listener,json.dumps(choices)))
+    c.execute('INSERT INTO conversations VALUES(%s,%s) ON CONFLICT(listener) DO UPDATE SET genres=excluded.genres',(listener,json.dumps(choices)))
     return {'response':response,'status':'awaiting_confirmation' if choices else 'not_found','suggestions':choices}
 
 
 def conversation(c, listener, query, needle, mode, genres):
     """Return a genre to fetch, or a reply to save without any acquisition."""
     if mode != 'auto': return None
-    saved = c.execute('SELECT genres FROM conversations WHERE listener=?',(listener,)).fetchone()
+    saved = c.execute('SELECT genres FROM conversations WHERE listener=%s',(listener,)).fetchone()
     offered = json.loads(saved['genres']) if saved else []
     if offered and needle in {'no','no thanks','cancel','never mind','nevermind'}:
-        c.execute('DELETE FROM conversations WHERE listener=?',(listener,))
+        c.execute('DELETE FROM conversations WHERE listener=%s',(listener,))
         return {'response':'No problem — I have not queued a song. Tell me another mood, genre, artist, album, or title.', 'status':'cancelled','suggestions':[]}
     if offered and needle in {'yes','yes please','sure','ok','okay','go ahead','sounds good','do it','surprise me'}:
         return {'genre':random.choice(offered)}
@@ -172,7 +172,7 @@ def conversation(c, listener, query, needle, mode, genres):
         choices=choices or genres[:3]
         if not choices:
             return {'response':"There are no playable genres in the catalog right now. Please try again once music is available.",'status':'not_found','suggestions':[]}
-        c.execute('INSERT INTO conversations VALUES(?,?) ON CONFLICT(listener) DO UPDATE SET genres=excluded.genres',(listener,json.dumps(choices)))
+        c.execute('INSERT INTO conversations VALUES(%s,%s) ON CONFLICT(listener) DO UPDATE SET genres=excluded.genres',(listener,json.dumps(choices)))
         response=("For that mood, how about " if preferred else "How are you feeling — relaxed, upbeat, reflective, or something else? We could try ")
         response+=', '.join(choices)+'. Would one of those fit? Choose a genre, tell me more about your mood, or say yes and I’ll pick from these. I’ll wait before fetching a song.'
         return {'response':response,'status':'awaiting_confirmation','suggestions':choices}
@@ -188,15 +188,15 @@ def submit(query, mode, listener, request_id):
             # No provider error bodies (which may contain sensitive context) reach clients.
             result = submit_local(query, mode, listener, request_id)
             with db.transaction() as c:
-                c.execute("UPDATE requests SET response=? WHERE id=? AND engine='basic'",
+                c.execute("UPDATE requests SET response=%s WHERE id=%s AND engine='basic'",
                           ('AI chat is temporarily unavailable; using basic catalog search. ' + result['response'], request_id))
-                return public(c.execute('SELECT * FROM requests WHERE id=?',(request_id,)).fetchone())
+                return public(c.execute('SELECT * FROM requests WHERE id=%s',(request_id,)).fetchone())
     return submit_local(query, mode, listener, request_id)
 
 
 def submit_local(query, mode, listener, request_id):
     with db.transaction() as c:
-        old = c.execute('SELECT * FROM requests WHERE id=?', (request_id,)).fetchone()
+        old = c.execute('SELECT * FROM requests WHERE id=%s', (request_id,)).fetchone()
         if old:
             if (old['listener'], old['query'], old['mode']) != (listener, query, mode):
                 raise ValueError('This request ID has already been used.')
@@ -215,12 +215,12 @@ def submit_local(query, mode, listener, request_id):
         exact=any(needle==normalize(v) for _,m in catalog for v in [m['title'],m.get('album',''),*m['artists']])
         turn=None if exact else conversation(c,listener,query,needle,search_mode,genres)
         if turn and 'genre' not in turn:
-            c.execute('INSERT INTO requests(id,listener,query,mode,response,status,created,suggestions) VALUES(?,?,?,?,?,?,?,?)',
+            c.execute('INSERT INTO requests(id,listener,query,mode,response,status,created,suggestions) VALUES(%s,%s,%s,%s,%s,%s,%s,%s)',
                       (request_id,listener,query,mode,turn['response'],turn['status'],time.time(),json.dumps(turn['suggestions'])))
-            return public(c.execute('SELECT * FROM requests WHERE id=?',(request_id,)).fetchone())
+            return public(c.execute('SELECT * FROM requests WHERE id=%s',(request_id,)).fetchone())
         if turn:
             needle,search_mode=normalize(turn['genre']),'genre'
-        c.execute('DELETE FROM conversations WHERE listener=?',(listener,))
+        c.execute('DELETE FROM conversations WHERE listener=%s',(listener,))
         for row,meta in catalog:
             fields = {'genre':[meta['genre']], 'track': [meta['title']], 'artist': meta['artists'], 'album': [meta.get('album', '')]}
             values = fields.get(search_mode, sum(fields.values(), []) + [meta['title']+' by '+' & '.join(meta['artists'])])
@@ -240,17 +240,17 @@ def submit_local(query, mode, listener, request_id):
         else:
             track_id, status = None, 'not_found'
             response = "I couldn't find a playable match in this station's licensed catalog. Try a song title, artist, album, or genre name" + (' from the downloaded library.' if capped else '.')
-        c.execute('INSERT INTO requests(id,listener,query,mode,response,track_id,status,created) VALUES(?,?,?,?,?,?,?,?)',
+        c.execute('INSERT INTO requests(id,listener,query,mode,response,track_id,status,created) VALUES(%s,%s,%s,%s,%s,%s,%s,%s)',
                   (request_id,listener,query,mode,response,track_id,status,time.time()))
         if track_id:
             if turn:
                 from app import telemetry
                 telemetry.emit('request.confirmed',who=listener,request_id=request_id,track_id=track_id)
             if search_mode == 'genre':
-                c.execute('UPDATE requests SET requested_genre=? WHERE id=?',(meta['genre'],request_id))
-            c.execute('DELETE FROM playlist WHERE track_id=?', (track_id,))
+                c.execute('UPDATE requests SET requested_genre=%s WHERE id=%s',(meta['genre'],request_id))
+            c.execute('DELETE FROM playlist WHERE track_id=%s', (track_id,))
             db.emit(c,'request:'+request_id,'request-downloads',{'kind':'request','track_id':track_id,'request_id':request_id})
-        return public(c.execute('SELECT * FROM requests WHERE id=?',(request_id,)).fetchone())
+        return public(c.execute('SELECT * FROM requests WHERE id=%s',(request_id,)).fetchone())
 
 
 def public(row):
@@ -259,14 +259,14 @@ def public(row):
 
 def history(listener):
     with db.connect() as c:
-        rows = c.execute('SELECT * FROM requests WHERE listener=? ORDER BY sequence DESC LIMIT 50',(listener,)).fetchall()
+        rows = c.execute('SELECT * FROM requests WHERE listener=%s ORDER BY sequence DESC LIMIT 50',(listener,)).fetchall()
         return [public(row) for row in reversed(rows)]
 
 
 def ordered_pending(c, now=None):
     now = time.time() if now is None else now
     history = [dict(p,metadata=json.loads(p['metadata'])) for p in c.execute(
-        'SELECT * FROM plays WHERE ends>? OR id IN (SELECT id FROM plays ORDER BY starts DESC LIMIT 3) ORDER BY starts',(now-WINDOW,))]
+        'SELECT * FROM plays WHERE ends>%s OR id IN (SELECT id FROM plays ORDER BY starts DESC LIMIT 3) ORDER BY starts',(now-WINDOW,))]
     rows = c.execute("SELECT t.*,r.id AS request_id FROM requests r JOIN tracks t ON t.id=r.track_id WHERE r.status='pending' ORDER BY r.sequence").fetchall()
     # Stable partition: ready eligible requests first, all deferred requests last.
     return sorted(rows, key=lambda r: not (r['status']=='ready' and bool(json.loads(r['metadata']).get('demo'))==DEMO and eligible(json.loads(r['metadata']),history,now)))

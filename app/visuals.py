@@ -69,7 +69,7 @@ def cache_artwork(track_id,meta):
     with (folder/'artwork.lock').open('a') as lock:
         fcntl.flock(lock,fcntl.LOCK_EX)
         with db.connect() as c:
-            row=c.execute('SELECT artwork_key FROM track_visuals WHERE track_id=?',(track_id,)).fetchone()
+            row=c.execute('SELECT artwork_key FROM track_visuals WHERE track_id=%s',(track_id,)).fetchone()
         if row and row['artwork_key']:return row['artwork_key']
         if not reference.exists():
             temporary=folder/'artwork.partial.jpg'
@@ -80,7 +80,7 @@ def cache_artwork(track_id,meta):
             finally:temporary.unlink(missing_ok=True)
         artwork_key=object_store.put(track_id,'artwork',reference)
         with db.transaction() as c:
-            c.execute("UPDATE track_visuals SET artwork_key=?,status=CASE WHEN status IN ('artwork_pending','artwork_unavailable') THEN 'artwork_ready' ELSE status END WHERE track_id=?",(artwork_key,track_id))
+            c.execute("UPDATE track_visuals SET artwork_key=%s,status=CASE WHEN status IN ('artwork_pending','artwork_unavailable') THEN 'artwork_ready' ELSE status END WHERE track_id=%s",(artwork_key,track_id))
         return artwork_key
 
 
@@ -96,14 +96,14 @@ def prepare_artwork_once():
         ids += [r['track_id'] for r in c.execute('SELECT track_id FROM playlist ORDER BY priority DESC,position LIMIT 2')]
         selected=None
         for track_id in dict.fromkeys(ids):
-            row=c.execute('SELECT metadata FROM tracks WHERE id=?',(track_id,)).fetchone()
+            row=c.execute('SELECT metadata FROM tracks WHERE id=%s',(track_id,)).fetchone()
             if not row:continue
             meta=json.loads(row['metadata'])
             if meta.get('demo') or not meta.get('bandcamp_url'):continue
-            visual=c.execute('SELECT artwork_key FROM track_visuals WHERE track_id=?',(track_id,)).fetchone()
+            visual=c.execute('SELECT artwork_key FROM track_visuals WHERE track_id=%s',(track_id,)).fetchone()
             if visual and visual['artwork_key']:continue
             if float(db.setting(c,'artwork-retry:'+track_id,'0'))>now:continue
-            c.execute("INSERT OR IGNORE INTO track_visuals(track_id,status,created) VALUES(?,'artwork_pending',?)",(track_id,now))
+            c.execute("INSERT INTO track_visuals(track_id,status,created) VALUES(%s,'artwork_pending',%s) ON CONFLICT DO NOTHING",(track_id,now))
             db.set_setting(c,'artwork-retry:'+track_id,now+600)
             selected=(track_id,meta)
             break
@@ -112,7 +112,7 @@ def prepare_artwork_once():
     try:cache_artwork(track_id,meta)
     except Exception:
         with db.transaction() as c:
-            c.execute("UPDATE track_visuals SET status='artwork_unavailable' WHERE track_id=? AND status='artwork_pending'",(track_id,))
+            c.execute("UPDATE track_visuals SET status='artwork_unavailable' WHERE track_id=%s AND status='artwork_pending'",(track_id,))
         raise
     return track_id
 
@@ -127,15 +127,15 @@ def schedule(c):
     announcement=json.loads(db.setting(c,'announcement_on_air','null'))
     if announcement:ids.insert(0,announcement['metadata']['id'])
     for track_id in dict.fromkeys(ids):
-        existing=c.execute('SELECT status FROM track_visuals WHERE track_id=?',(track_id,)).fetchone()
+        existing=c.execute('SELECT status FROM track_visuals WHERE track_id=%s',(track_id,)).fetchone()
         if existing and not existing['status'].startswith('artwork_'):continue
-        c.execute("INSERT INTO track_visuals(track_id,status,created) VALUES(?,'queued',?) ON CONFLICT(track_id) DO UPDATE SET status='queued'",(track_id,now))
+        c.execute("INSERT INTO track_visuals(track_id,status,created) VALUES(%s,'queued',%s) ON CONFLICT(track_id) DO UPDATE SET status='queued'",(track_id,now))
         db.emit(c,'visual:'+track_id,'visuals',{'kind':'visual','track_id':track_id})
 
 
 def public(c,track_id):
     if not track_id:return None
-    row=c.execute('SELECT * FROM track_visuals WHERE track_id=?',(track_id,)).fetchone()
+    row=c.execute('SELECT * FROM track_visuals WHERE track_id=%s',(track_id,)).fetchone()
     if not row:return None
     base='/api/visuals/'+quote(track_id,safe='')
     return {'track_id':track_id,'status':row['status'],'video_url':base+'/video' if row['status']=='ready' else None,
@@ -144,14 +144,14 @@ def public(c,track_id):
 
 def update(track_id,**fields):
     with db.transaction() as c:
-        c.execute('UPDATE track_visuals SET '+','.join(k+'=?' for k in fields)+' WHERE track_id=?',list(fields.values())+[track_id])
+        c.execute('UPDATE track_visuals SET '+','.join(k+'=%s' for k in fields)+' WHERE track_id=%s',list(fields.values())+[track_id])
 
 
 def process(event):
     track_id=event['track_id']
     with db.connect() as c:
-        row=dict(c.execute('SELECT * FROM track_visuals WHERE track_id=?',(track_id,)).fetchone())
-        meta=json.loads(c.execute('SELECT metadata FROM tracks WHERE id=?',(track_id,)).fetchone()[0])
+        row=dict(c.execute('SELECT * FROM track_visuals WHERE track_id=%s',(track_id,)).fetchone())
+        meta=json.loads(c.execute('SELECT metadata FROM tracks WHERE id=%s',(track_id,)).fetchone()[0])
     if row['status'] in {'ready','unavailable','failed','submission_unknown'}:return
     if not row['provider_id'] and os.getenv('VIDEOS_ENABLED','1')!='1':
         raise RuntimeError('Video generation is paused')

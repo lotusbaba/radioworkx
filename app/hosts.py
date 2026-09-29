@@ -25,7 +25,7 @@ def valid_url(url, expected=None):
 
 def register(c,host,kind=None,role='source',status='discovered',origin=None,notes=''):
     now=time.time()
-    c.execute('INSERT INTO source_hosts(hostname,provider,role,status,discovered_from,notes,first_seen,last_seen) VALUES(?,?,?,?,?,?,?,?) '
+    c.execute('INSERT INTO source_hosts(hostname,provider,role,status,discovered_from,notes,first_seen,last_seen) VALUES(%s,%s,%s,%s,%s,%s,%s,%s) '
               'ON CONFLICT(hostname) DO UPDATE SET last_seen=excluded.last_seen',
               (host,kind or provider(host),role,status,origin,notes,now,now))
 
@@ -34,10 +34,10 @@ def completed(c,track_id,source_host,media_host,at):
     if not source_host:return
     register(c,source_host,status='active')
     if media_host:register(c,media_host,role='media',status='active',origin=source_host)
-    inserted=c.execute('INSERT OR IGNORE INTO host_downloads VALUES(?,?,?,?)',(track_id,source_host,media_host,at)).rowcount
+    inserted=c.execute('INSERT INTO host_downloads VALUES(%s,%s,%s,%s) ON CONFLICT DO NOTHING',(track_id,source_host,media_host,at)).rowcount
     if inserted:
         for host in set(filter(None,(source_host,media_host))):
-            c.execute("UPDATE source_hosts SET tracks_downloaded=tracks_downloaded+1,status='active' WHERE hostname=?",(host,))
+            c.execute("UPDATE source_hosts SET tracks_downloaded=tracks_downloaded+1,status='active' WHERE hostname=%s",(host,))
 
 
 def bootstrap(c):

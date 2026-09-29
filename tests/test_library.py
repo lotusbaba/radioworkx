@@ -11,7 +11,7 @@ def seed(metadata):
     with db.transaction() as c:
         for tid,status,artists,album in [('one','ready',['A & B','Guest'],'album-1'),('two','available',['A & B'],'album-2'),('bad','failed',['Guest'],'album-1')]:
             meta={**metadata,'id':tid,'artists':artists,'album_id':album,'album':'Same title','title':tid,'license_url':'https://creativecommons.org/licenses/by/4.0/'}
-            c.execute('INSERT INTO tracks(id,metadata,status,source,rights,path,duration) VALUES(?,?,?,?,?,?,100)',(tid,json.dumps(meta),status,'https://private.example/secret','private-rights',str(path)))
+            c.execute('INSERT INTO tracks(id,metadata,status,source,rights,path,duration) VALUES(%s,%s,%s,%s,%s,%s,100)',(tid,json.dumps(meta),status,'https://private.example/secret','private-rights',str(path)))
 
 
 def test_library_entities_privacy_and_navigation(metadata):
@@ -63,7 +63,7 @@ def test_recording_range_and_path_confinement(metadata):
     assert response.status_code==206 and response.content==b'2345'
     assert response.headers['content-type']=='audio/mpeg'
     assert client.get('/api/listen/two/audio').status_code==409
-    with db.transaction() as c:c.execute("UPDATE tracks SET path=? WHERE id='one'",(str(db.DATA/'radio.db'),))
+    with db.transaction() as c:c.execute("UPDATE tracks SET path=%s WHERE id='one'",(str(db.DATA/'radio.db'),))
     assert client.get('/api/listen/one/audio').status_code==404
 
 

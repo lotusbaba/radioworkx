@@ -8,7 +8,7 @@ def setup(monkeypatch, metadata):
     monkeypatch.setenv('OPENAI_API_KEY','test-key')
     metadata['demo'] = rag.DEMO
     with db.transaction() as c:
-        c.execute("INSERT INTO tracks(id,metadata,status) VALUES(?,?,'ready')",(metadata['id'],json.dumps(metadata)))
+        c.execute("INSERT INTO tracks(id,metadata,status) VALUES(%s,%s,'ready')",(metadata['id'],json.dumps(metadata)))
     monkeypatch.setattr(rag,'retrieve',lambda query,items:items)
     return metadata
 

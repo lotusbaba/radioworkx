@@ -13,7 +13,7 @@ def test_admin_auth_and_pagination(metadata,monkeypatch):
         assert client.get(url,auth=('admin','wrong')).status_code==401
     with db.transaction() as c:
         for n in range(3):
-            c.execute('INSERT INTO tracks(id,metadata,status) VALUES(?,?,?)',(str(n),json.dumps(metadata),'pending'))
+            c.execute('INSERT INTO tracks(id,metadata,status) VALUES(%s,%s,%s)',(str(n),json.dumps(metadata),'pending'))
     auth=('admin','operator-secret')
     assert client.get('/admin',auth=auth).status_code==200
     first=client.get('/api/admin/repository/tracks?page_size=2',auth=auth).json()
@@ -26,11 +26,11 @@ def test_admin_auth_and_pagination(metadata,monkeypatch):
 def test_activity_dates_and_public_request_privacy(metadata,monkeypatch):
     monkeypatch.setenv('ADMIN_PASSWORD','secret')
     with db.transaction() as c:
-        c.execute("INSERT INTO tracks(id,metadata,status) VALUES('track-a',?,'pending')",(json.dumps(metadata),))
+        c.execute("INSERT INTO tracks(id,metadata,status) VALUES('track-a',%s,'pending')",(json.dumps(metadata),))
         for n,at in enumerate([100,200,300]):
-            c.execute("INSERT INTO reactions(id,play_id,listener,emoji,accepted,metadata) VALUES(?,'p','private','🔥',?,?)",(str(n),at,json.dumps(metadata)))
+            c.execute("INSERT INTO reactions(id,play_id,listener,emoji,accepted,metadata) VALUES(%s,'p','private','🔥',%s,%s)",(str(n),at,json.dumps(metadata)))
         for n,status in enumerate(['pending','played']):
-            c.execute("INSERT INTO requests(id,listener,query,mode,response,track_id,status,created) VALUES(?,?,'private chat','track','private reply','track-a',?,200)",(str(n),'secret-user-'+str(n),status))
+            c.execute("INSERT INTO requests(id,listener,query,mode,response,track_id,status,created) VALUES(%s,%s,'private chat','track','private reply','track-a',%s,200)",(str(n),'secret-user-'+str(n),status))
         view=playlist_views(c,None,250)
     feed=view['community_requests']
     assert len(feed)==2 and {r['status'] for r in feed}=={'Queued','Played'}
@@ -47,7 +47,7 @@ def test_request_intro_is_play_specific_and_race_checked(metadata):
     assert 'requested' not in announcer.script(metadata,{})
     assert announcer.cache_key(metadata,True)!=announcer.cache_key(metadata,False)
     with db.transaction() as c:
-        c.execute("INSERT INTO tracks(id,metadata,status,duration,path) VALUES('track-a',?,'ready',100,'test.mp3')",(json.dumps(metadata),))
+        c.execute("INSERT INTO tracks(id,metadata,status,duration,path) VALUES('track-a',%s,'ready',100,'test.mp3')",(json.dumps(metadata),))
         c.execute("INSERT INTO requests(id,listener,query,mode,response,track_id,status,created) VALUES('request-a','listener','q','track','r','track-a','pending',1)")
     assert station.select_next(1000,expected_track_id='track-a',expected_request_id=None) is None
     with db.connect() as c:
@@ -62,12 +62,12 @@ def test_track_playback_counts_filters_and_sorting(metadata,monkeypatch):
     now=time.time()
     with db.transaction() as c:
         for track,count in [('a',0),('b',2),('c',10),('d',11)]:
-            c.execute('INSERT INTO tracks(id,metadata,status) VALUES(?,?,?)',(track,json.dumps(dict(metadata,title=track)),'ready'))
+            c.execute('INSERT INTO tracks(id,metadata,status) VALUES(%s,%s,%s)',(track,json.dumps(dict(metadata,title=track)),'ready'))
             for n in range(count):
-                c.execute('INSERT INTO plays(id,track_id,metadata,starts,ends,actual_end) VALUES(?,?,?,?,?,?)',
+                c.execute('INSERT INTO plays(id,track_id,metadata,starts,ends,actual_end) VALUES(%s,%s,%s,%s,%s,%s)',
                           (f'{track}-{n}',track,json.dumps(metadata),now-100,now-50,now-60))
         for pid,start,finish in [('future',now+100,None),('aborted',now-100,now-101),('intro',now-100,None)]:
-            c.execute('INSERT INTO plays(id,track_id,metadata,starts,ends,actual_end) VALUES(?,?,?,?,?,?)',
+            c.execute('INSERT INTO plays(id,track_id,metadata,starts,ends,actual_end) VALUES(%s,%s,%s,%s,%s,%s)',
                       (pid,'a',json.dumps(metadata),start,start+200,finish))
         db.set_setting(c,'announcement_on_air',json.dumps({'play_id':'intro'}))
     client=TestClient(app)

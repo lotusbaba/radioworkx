@@ -8,13 +8,13 @@ from app import db
 def test_public_stats_periods_and_privacy(metadata):
     now=time.time()
     with db.transaction() as c:
-        c.execute("INSERT INTO tracks(id,metadata,status) VALUES('a',?,'ready')",(json.dumps(metadata),))
-        c.execute("INSERT INTO tracks(id,metadata,status) VALUES('b',?,'available')",(json.dumps(metadata),))
+        c.execute("INSERT INTO tracks(id,metadata,status) VALUES('a',%s,'ready')",(json.dumps(metadata),))
+        c.execute("INSERT INTO tracks(id,metadata,status) VALUES('b',%s,'available')",(json.dumps(metadata),))
         for n,age in enumerate([10,2*86400,9*86400]):
-            c.execute("INSERT INTO reactions(id,play_id,listener,emoji,accepted,metadata) VALUES(?,'p','private-listener','🔥',?,?)",(str(n),now-age,json.dumps(metadata)))
-        c.execute("INSERT INTO host_downloads VALUES('a','example.org',NULL,?)",(now-10,))
-        c.execute("INSERT INTO requests(id,listener,query,mode,response,track_id,status,created) VALUES('r','private-listener','private-query','track','private-reply','a','pending',?)",(now-10,))
-        c.execute("INSERT INTO requests(id,listener,query,mode,response,status,created) VALUES('chat','private-listener','private-query','auto','private-reply','answered',?)",(now-10,))
+            c.execute("INSERT INTO reactions(id,play_id,listener,emoji,accepted,metadata) VALUES(%s,'p','private-listener','🔥',%s,%s)",(str(n),now-age,json.dumps(metadata)))
+        c.execute("INSERT INTO host_downloads VALUES('a','example.org',NULL,%s)",(now-10,))
+        c.execute("INSERT INTO requests(id,listener,query,mode,response,track_id,status,created) VALUES('r','private-listener','private-query','track','private-reply','a','pending',%s)",(now-10,))
+        c.execute("INSERT INTO requests(id,listener,query,mode,response,status,created) VALUES('chat','private-listener','private-query','auto','private-reply','answered',%s)",(now-10,))
     client=TestClient(app)
     for period,likes in [('24h',1),('7d',2),('all',3)]:
         response=client.get('/api/stats',params={'period':period})

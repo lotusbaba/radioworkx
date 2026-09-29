@@ -95,13 +95,13 @@ def status():
                 meta['album_page']=album_ref(meta)
         preview_play = play
         if announcement:
-            reserved=c.execute('SELECT ends FROM plays WHERE id=?',(announcement['play_id'],)).fetchone()
+            reserved=c.execute('SELECT ends FROM plays WHERE id=%s',(announcement['play_id'],)).fetchone()
             if reserved: preview_play={'ends':reserved['ends'],'track_id':announcement['metadata']['id']}
-        counts = c.execute('SELECT emoji,COUNT(*) AS n FROM reactions WHERE play_id=? GROUP BY emoji',
+        counts = c.execute('SELECT emoji,COUNT(*) AS n FROM reactions WHERE play_id=%s GROUP BY emoji',
                            (play['id'] if play else '',)).fetchall()
         count = c.execute('SELECT COUNT(*) FROM tracks WHERE downloaded_at IS NOT NULL').fetchone()[0]
         pending = c.execute('SELECT COUNT(*) FROM playlist').fetchone()[0]
-        history = c.execute('SELECT metadata,starts FROM plays WHERE starts<=? ORDER BY starts DESC LIMIT 7',(time.time(),)).fetchall()
+        history = c.execute('SELECT metadata,starts FROM plays WHERE starts<=%s ORDER BY starts DESC LIMIT 7',(time.time(),)).fetchall()
         from app.visuals import public as visual_status
         visual=visual_status(c,play['track_id'] if play else announcement['metadata']['id'] if announcement else None)
         return dict(visual=visual,**playlist_views(c,preview_play,time.time()),announcement=announcement,chat_engine='rag' if os.getenv('OPENAI_API_KEY') else 'basic',next_airtime=None if play or announcement else next_airtime(c,time.time()),reaction_cooldown=COOLDOWN,play=play,ranking=ranking(),emojis=EMOJIS,
@@ -135,9 +135,9 @@ def public_stats(response: Response, period: Literal['24h','7d','all']='7d'):
     with db.connect() as c:
         c.execute('BEGIN')
         library=c.execute("SELECT COUNT(*) FROM tracks WHERE status='ready'").fetchone()[0]
-        genres=[dict(row) for row in c.execute("SELECT COALESCE(json_extract(metadata,'$.genre'),'Unknown') AS genre,COUNT(*) AS likes FROM reactions WHERE accepted>=? AND accepted<? GROUP BY genre ORDER BY likes DESC,genre",(start,end))]
-        downloads=c.execute('SELECT COUNT(*) FROM host_downloads WHERE completed>=? AND completed<?',(start,end)).fetchone()[0]
-        requests=c.execute('SELECT COUNT(*) FROM requests WHERE track_id IS NOT NULL AND created>=? AND created<?',(start,end)).fetchone()[0]
+        genres=[dict(row) for row in c.execute("SELECT COALESCE((metadata::jsonb ->> 'genre'),'Unknown') AS genre,COUNT(*) AS likes FROM reactions WHERE accepted>=%s AND accepted<%s GROUP BY genre ORDER BY likes DESC,genre",(start,end))]
+        downloads=c.execute('SELECT COUNT(*) FROM host_downloads WHERE completed>=%s AND completed<%s',(start,end)).fetchone()[0]
+        requests=c.execute('SELECT COUNT(*) FROM requests WHERE track_id IS NOT NULL AND created>=%s AND created<%s',(start,end)).fetchone()[0]
     response.headers['Cache-Control']='public, max-age=15'
     return dict(period=period,library=library,likes=sum(row['likes'] for row in genres),downloads=downloads,requests=requests,genres=genres,updated_at=end)
 
@@ -251,9 +251,9 @@ def visual_asset(track_id:str,kind:Literal['video','artwork']):
     from app import object_store
     from fastapi.responses import FileResponse
     with db.connect() as c:
-        visual=c.execute('SELECT * FROM track_visuals WHERE track_id=?',(track_id,)).fetchone()
+        visual=c.execute('SELECT * FROM track_visuals WHERE track_id=%s',(track_id,)).fetchone()
         if not visual or not visual[kind+'_key']:raise HTTPException(404,'Visual is not ready')
-        row=c.execute('SELECT * FROM media_objects WHERE object_key=?',(visual[kind+'_key'],)).fetchone()
+        row=c.execute('SELECT * FROM media_objects WHERE object_key=%s',(visual[kind+'_key'],)).fetchone()
     if not row:raise HTTPException(404,'Visual is not ready')
     try:path=object_store.local_path(row)
     except Exception:raise HTTPException(503,'Visual is temporarily unavailable')

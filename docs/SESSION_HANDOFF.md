@@ -813,3 +813,139 @@ on desktop/mobile for “September 2015 Instrumental”, with no JS errors. Mobi
 artwork screenshot was visually inspected. Current worker VIDEOS_ENABLED=0 was
 verified; public visual status was artwork_ready with video_url null. Releases
 without usable source artwork still show the existing station fallback.
+
+## Announcement tail pause followed by resumed words (2026-09-29)
+
+User clarified a different symptom: the final words resume after about two seconds,
+then music plays. Earlier byte-continuity verification did not establish smooth
+wall-clock delivery. Timed an existing cached announcement through separate FFmpeg
+processes without publishing any audio: ordinary output had no >0.3-second gaps.
+A read-only live Redis/HTTP capture then found smooth speech (max Redis gap 0.168s,
+HTTP 0.236s), but a 5.895s Redis / 5.927s HTTP gap from the last speech bytes to the
+first music bytes. Full reference speech bytes were present. This supports a
+transition starvation explanation; it is not a direct recording of the user's
+speaker output or a per-call attribution of every millisecond in the delay.
+
+The main loop synchronously called refill after start_music and before starting the
+song's FFmpeg process. Moved this refill to a coalescing station-refill background
+thread, retaining the existing pre-selection refill. Music transmission no longer
+waits for that acquisition/recovery calculation. Cached inputs are normalized MP3s;
+FFmpeg now uses an explicit MP3 demuxer, bounded 32768-byte probe, and packet flushing.
+A separate startup test measured the current song's first output at 0.414s with the
+old command and 0.072s with explicit input/bounded probe (same existing file).
+
+159 tests passed, including refill concurrency, full tail forwarding, and a main-loop
+regression forbidding synchronous refill between intro and music. Built station image
+`d64a1d60be419f01afc730fa4fc3764101757bb1316d78769a164227bade1688` and restarted only
+station after observing the prior song's recorded end. A short introduction begun
+during the deployment was interrupted; the diagnostic explicitly discarded that
+incomplete introduction. History and media volumes were preserved. API was unchanged.
+
+The first complete post-deployment transition (“Mir”) delivered all 124,551 cached
+speech bytes, with max speech gaps 0.141s Redis / 0.161s HTTP, and only 0.219s between
+speech and music in both Redis and HTTP. No capture errors. The observer ran as a
+separate temporary process inside api-next so the station restart did not kill it.
+This measures actual stream timing, not audible playback on the user's device.
+Updated STATION_AUDIO_ARCHITECTURE.md with the refill thread and FFmpeg flags.
+Other pending adversarial-spec/docs changes were left untouched. These timing-fix
+changes are deployed but have not yet been committed or pushed.
+
+## PostgreSQL refactor prepared; live cutover pending (2026-09-29)
+
+User requested moving all database tables to an existing local PostgreSQL instance.
+Found `app-db-1`, image `postgres:13`, publishing host port 5432. The target database,
+role, credential-file location, and whether to create a dedicated database have been
+requested but not supplied. Do not infer credentials or alter that unrelated app's
+database. No live cutover or PostgreSQL deployment has occurred.
+
+Application SQL now uses native Psycopg parameters, PostgreSQL JSON operators,
+ON CONFLICT, identity sequences, and DOUBLE PRECISION timestamps. `app/schema.sql`
+contains all 28 main tables plus observer_settings/observer_seen, replacing the
+separate observer SQLite database. `db.transaction()` takes a transaction-scoped
+advisory lock scoped to database/schema to preserve serialized business decisions.
+`DATABASE_URL` is mandatory; media still uses DATA_DIR and existing volumes. Compose
+now requires this variable even for configuration/status commands. Existing running
+containers still have the previous SQLite code, including the deployed timing fix.
+
+`scripts/migrate_postgres.py` imports read-only SQLite snapshots into an empty target
+in one transaction. Defaults to rehearsal rollback; --apply commits after all row
+fingerprints/multiplicities match. Preserves identity high-water marks, rejects
+unknown tables/columns, invalid FKs, unrelated/nonempty targets and wrong source DBs.
+Both station and observer snapshots are needed for this installation. Read
+`docs/POSTGRES_MIGRATION.md` before cutover: stop every writer, take fresh backups,
+import before bootstrap, then recreate previously running application services.
+Do not use a rolling overlap across SQLite/PostgreSQL. Downloads remains stopped;
+video generation remains paused. Retain original media/history volumes and rollback
+images. Once PostgreSQL accepts new writes, switching back requires reconciliation.
+
+Verification used a separate memory-backed PostgreSQL 13 service from compose.test.yaml
+on loopback 55432. Tests require TEST_DATABASE_URL and create/drop random schemas;
+they never fall back to the production URL. Full suite passed 161 tests, followed by
+additional migration rejection/rollback coverage. Isolated Chrome accounts smoke
+passed registration, likes, playlist create/add/rename/remove, actual playback and
+automatic advance, sign-in persistence, and mobile layout with no JavaScript errors.
+A separate Linux verification image successfully built with Psycopg 3.3.6.
+
+Read-only backup-API snapshots of live radio.db and observer.sqlite were copied to
+private temporary files for a rehearsal. Imported into a disposable PostgreSQL
+schema and verified all 30 tables, including 6,903 tracks, 6,286 plays, 2,886
+announcements, 4,194 outbox records, 11,269 observer keys, and all existing accounts,
+sessions, likes, playlists and playlist tracks. Repeated init and the real-data
+download-history query passed. The temporary schema was removed afterward. These
+snapshots were taken while live writers continued and must NOT be used for final
+cutover; fresh stopped-writer backups are required. The existing PostgreSQL instance
+and production data were not modified. Refactor changes are uncommitted/unpushed.
+Preserved the prior station timing edits and unrelated adversarial documentation.
+
+Final focused migration/observer checks: 11 passed, including rollback after a
+mid-copy data error and rejection of a wrong source database. Private rehearsal
+snapshot files were deleted after verification.
+
+
+## PostgreSQL live cutover completed (2026-09-29)
+
+User provided local PostgreSQL credentials. Created dedicated database `radioworkx`
+and role `radioworkx` with a generated application password in ignored `.env`.
+IMPORTANT correction: actual target is Homebrew PostgreSQL 14.15, not the unrelated
+`app-db-1` PostgreSQL 13 container. Verified localhost, 127.0.0.1, and ::1 all list
+radioworkx on port 5432. Database browsers connected to `postgres` may need a database
+list refresh or a direct connection to `radioworkx`; tables are in public schema.
+Containers connect through host.docker.internal:5432 to that same dedicated database.
+
+Stopped all writers and migrated 30 tables with exact row verification: 6,903 tracks,
+6,293 plays at cutover, all account/session/like/playlist rows, 2,886 announcements,
+4,196 outbox rows, and 11,289 observer checkpoint rows. First backup attempt failed
+because SQLite needed writable journal/shared-memory state on the read-only mount;
+it automatically restarted unchanged SQLite containers before any import. Retried
+with copies of the stopped database plus WAL in a private writable directory, then
+SQLite's backup API. Successful copy/restart took 18.7 seconds. Original media and
+SQLite volumes are retained. Private SQLite snapshots, original configuration/image
+inventory, migration counts, and initial PostgreSQL custom-format dump are under
+ignored `.deploy/postgres-cutover/`; these contain private data and must stay ignored.
+
+Detected startup DDL deadlocks after the first PostgreSQL rollout. Fixed db.init to
+skip DDL when the recorded schema digest matches; importer records that digest too.
+Regression holds a read transaction open during repeated initialization. All 164
+tests pass. Final application image is
+`sha256:d11cb014394226c7fec985768d06b1e695e8732ab101cb4d125f1dd821d5ff1f`.
+Managed API deployment switched to `api` with connection draining. Workers use
+RADIO_WORKER_IMAGE through shared Compose image configuration. Downloads remains
+stopped; VIDEOS_ENABLED=0. SQLite-era API rollback pointers were removed; never
+restore those images against a now-active PostgreSQL deployment without reconciliation.
+
+Public/local health, my-music, anonymous account protection, status, and public live
+MP3 delivery passed. New plays and observer checkpoints were verified in PostgreSQL.
+Chrome library smoke passed artist/album navigation, real cached playback, seeking,
+and mobile layout without JavaScript errors. Status requests took about 9–18 seconds;
+this existing performance issue is not claimed fixed. No new tracks were downloaded
+for verification. Changes remain uncommitted/unpushed.
+
+Final follow-up audit after DBeaver connection was confirmed: all 30 public tables
+remain accessible, with 6,903 tracks and five post-cutover plays at verification.
+All seven active application services use the final image with zero restarts;
+standby api-next and downloads are stopped on that same image. PostgreSQL backup
+archive is readable and contains 30 table-data entries. SQLite rollback snapshots
+remain private and nonempty. Public health returns 200. No further database cutover
+steps remain. The migration implementation, station timing fix, tests, and operational
+docs are included in the PostgreSQL release commit; consult Git history for its
+revision and remote status. Separate adversarial-testing draft changes remain local.

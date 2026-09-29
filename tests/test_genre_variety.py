@@ -7,7 +7,7 @@ def seed(metadata):
     with db.transaction() as c:
         for tid in ['cylinder','new-a','new-b']:
             m={**metadata,'id':tid,'title':'Cylinder One' if tid=='cylinder' else tid,'artists':[tid],'album_id':tid,'genre':'ambient'}
-            c.execute("INSERT INTO tracks(id,metadata,status,duration,source,rights) VALUES(?,?,'ready',100,'https://example.org/music','licensed')",(tid,json.dumps(m)))
+            c.execute("INSERT INTO tracks(id,metadata,status,duration,source,rights) VALUES(%s,%s,'ready',100,'https://example.org/music','licensed')",(tid,json.dumps(m)))
         c.execute("INSERT INTO plays(id,track_id,metadata,starts,ends,actual_end) SELECT 'old',id,metadata,100,200,200 FROM tracks WHERE id='cylinder'")
 
 
@@ -23,5 +23,5 @@ def test_genre_uses_request_recency_after_every_track_used(metadata):
     seed(metadata)
     with db.transaction() as c:
         for tid,created in [('new-a',300),('new-b',400),('cylinder',500)]:
-            c.execute("INSERT INTO requests(id,listener,query,mode,response,track_id,status,created) VALUES(?,'listener','','genre','',?,'played',?)",(tid,tid,created))
+            c.execute("INSERT INTO requests(id,listener,query,mode,response,track_id,status,created) VALUES(%s,'listener','','genre','',%s,'played',%s)",(tid,tid,created))
         assert choose_genre_track(c,'ambient',10000)[0]['id']=='new-a'

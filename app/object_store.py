@@ -29,14 +29,14 @@ def put(track_id,kind,path):
     mime={'audio':'audio/mpeg','artwork':'image/jpeg','video':'video/mp4'}[kind]
     object_key=key(track_id,kind)
     with db.transaction() as c:
-        c.execute('INSERT INTO media_objects(object_key,track_id,kind,path,mime) VALUES(?,?,?,?,?) ON CONFLICT(object_key) DO UPDATE SET path=excluded.path',
+        c.execute('INSERT INTO media_objects(object_key,track_id,kind,path,mime) VALUES(%s,%s,%s,%s,%s) ON CONFLICT(object_key) DO UPDATE SET path=excluded.path',
                   (object_key,track_id,kind,str(path),mime))
     upload(object_key)
     return object_key
 
 
 def upload(object_key):
-    with db.connect() as c:row=c.execute('SELECT * FROM media_objects WHERE object_key=?',(object_key,)).fetchone()
+    with db.connect() as c:row=c.execute('SELECT * FROM media_objects WHERE object_key=%s',(object_key,)).fetchone()
     s3=client()
     try:s3.head_bucket(Bucket=bucket())
     except ClientError as error:
@@ -46,14 +46,14 @@ def upload(object_key):
     except ClientError as error:
         if error.response['Error']['Code'] not in {'404','NoSuchKey','NotFound'}:raise
         s3.upload_file(row['path'],bucket(),object_key,ExtraArgs={'ContentType':row['mime']})
-    with db.transaction() as c:c.execute('UPDATE media_objects SET checked=? WHERE object_key=?',(time.time(),object_key))
+    with db.transaction() as c:c.execute('UPDATE media_objects SET checked=%s WHERE object_key=%s',(time.time(),object_key))
 
 
 def sync_one():
     # Backfill existing music incrementally, independent of on-air transmission.
     with db.connect() as c:
         track=c.execute("SELECT id,path FROM tracks WHERE status='ready' AND path IS NOT NULL AND id NOT IN (SELECT track_id FROM media_objects WHERE kind='audio') LIMIT 1").fetchone()
-        row=c.execute('SELECT object_key FROM media_objects WHERE checked IS NULL OR checked<? ORDER BY COALESCE(checked,0) LIMIT 1',(time.time()-3600,)).fetchone()
+        row=c.execute('SELECT object_key FROM media_objects WHERE checked IS NULL OR checked<%s ORDER BY COALESCE(checked,0) LIMIT 1',(time.time()-3600,)).fetchone()
     if track and Path(track['path']).exists():put(track['id'],'audio',track['path'])
     elif row:upload(row['object_key'])  # Restore objects after an emulator reset from durable copies.
 

@@ -8,8 +8,8 @@ from app.api import app
 
 def seed(metadata,status='queued'):
     with db.transaction() as c:
-        c.execute("INSERT INTO tracks(id,metadata,status,duration) VALUES(?,?,'ready',180)",(metadata['id'],json.dumps(metadata)))
-        c.execute('INSERT INTO track_visuals(track_id,status,created) VALUES(?,?,1)',(metadata['id'],status))
+        c.execute("INSERT INTO tracks(id,metadata,status,duration) VALUES(%s,%s,'ready',180)",(metadata['id'],json.dumps(metadata)))
+        c.execute('INSERT INTO track_visuals(track_id,status,created) VALUES(%s,%s,1)',(metadata['id'],status))
 
 
 def test_schedule_once_and_disabled(metadata,monkeypatch):
@@ -63,7 +63,7 @@ def test_media_endpoint_range_and_missing(metadata,tmp_path):
     path=tmp_path/'clip.mp4';path.write_bytes(b'0123456789')
     with db.transaction() as c:
         c.execute("UPDATE track_visuals SET video_key='video/test.mp4'")
-        c.execute("INSERT INTO media_objects(object_key,track_id,kind,path,mime) VALUES('video/test.mp4',?,'video',?,'video/mp4')",(metadata['id'],str(path)))
+        c.execute("INSERT INTO media_objects(object_key,track_id,kind,path,mime) VALUES('video/test.mp4',%s,'video',%s,'video/mp4')",(metadata['id'],str(path)))
     client=TestClient(app)
     response=client.get('/api/visuals/track-a/video',headers={'Range':'bytes=2-5'})
     assert response.status_code==206 and response.content==b'2345'

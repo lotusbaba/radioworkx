@@ -31,7 +31,7 @@ def test_unsupported_evidence_is_not_announced(metadata,monkeypatch):
 def test_speech_request_cached_and_not_a_music_download(metadata,monkeypatch,has_track):
     if has_track:
         with db.transaction() as c:
-            c.execute('INSERT INTO tracks(id,metadata) VALUES(?,?)',(metadata['id'],json.dumps(metadata)))
+            c.execute('INSERT INTO tracks(id,metadata) VALUES(%s,%s)',(metadata['id'],json.dumps(metadata)))
     monkeypatch.setenv('OPENAI_API_KEY','test-key')
     monkeypatch.setattr(announcer,'page_details',lambda m:{})
     calls=[]
@@ -71,7 +71,7 @@ def test_music_clock_starts_after_intro(metadata,playing,monkeypatch):
 
 def test_changed_candidate_does_not_reserve_or_introduce_wrong_song(metadata):
     with db.transaction() as c:
-        c.execute("INSERT INTO tracks(id,metadata,status,duration,path) VALUES('real',?,'ready',100,'test.mp3')",(json.dumps(metadata),))
+        c.execute("INSERT INTO tracks(id,metadata,status,duration,path) VALUES('real',%s,'ready',100,'test.mp3')",(json.dumps(metadata),))
     assert station.select_next(1000,expected_track_id='stale') is None
     with db.connect() as c:assert c.execute('SELECT COUNT(*) FROM plays').fetchone()[0]==0
 
@@ -116,8 +116,8 @@ def test_persistent_intro_adopts_old_cache_and_survives_config_change(metadata,m
     path=tmp_path/'intro.mp3';path.write_bytes(b'audio')
     key=announcer.cache_key(metadata)
     with db.transaction() as c:
-        c.execute('INSERT INTO tracks(id,metadata) VALUES(?,?)',(metadata['id'],json.dumps(metadata)))
-        c.execute('INSERT INTO announcements VALUES(?,?,?,?,?,?,?,?)',(key,metadata['id'],'Saved intro','{}',str(path),12,1,'onyx'))
+        c.execute('INSERT INTO tracks(id,metadata) VALUES(%s,%s)',(metadata['id'],json.dumps(metadata)))
+        c.execute('INSERT INTO announcements VALUES(%s,%s,%s,%s,%s,%s,%s,%s)',(key,metadata['id'],'Saved intro','{}',str(path),12,1,'onyx'))
     assert announcer.cached(metadata)['script']=='Saved intro'
     with db.connect() as c:
         assert c.execute('SELECT intro_id FROM tracks').fetchone()[0]==key
@@ -134,8 +134,8 @@ def test_queue_preparation_skips_cached_and_cooldown_and_follows_requests(metada
     metas=[{**metadata,'id':str(n),'artists':[str(n)],'album_id':str(n)} for n in range(12)]
     with db.transaction() as c:
         for meta in metas:
-            c.execute("INSERT INTO tracks(id,metadata,status,duration) VALUES(?,?,'ready',100)",(meta['id'],json.dumps(meta)))
-            c.execute('INSERT INTO playlist(track_id) VALUES(?)',(meta['id'],))
+            c.execute("INSERT INTO tracks(id,metadata,status,duration) VALUES(%s,%s,'ready',100)",(meta['id'],json.dumps(meta)))
+            c.execute('INSERT INTO playlist(track_id) VALUES(%s)',(meta['id'],))
         db.set_setting(c,'announcement-retry:'+announcer.cache_key(metas[1]),time.time()+300)
     monkeypatch.setattr(announcer,'cached',lambda m,requested=False: {'id':'saved'} if m['id']=='0' else None)
     calls=[]

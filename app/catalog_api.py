@@ -47,23 +47,23 @@ def genre_counts():
 def enqueue(track_id,listener,request_id):
     from app.requests import public
     with db.transaction() as c:
-        old=c.execute('SELECT * FROM requests WHERE id=?',(request_id,)).fetchone()
+        old=c.execute('SELECT * FROM requests WHERE id=%s',(request_id,)).fetchone()
         query='Catalog track: '+track_id
         if old:
             if (old['listener'],old['track_id'],old['query'])!=(listener,track_id,query):
                 raise HTTPException(409,'Request ID already used for a different request.')
             return public(old)
-        row=c.execute('SELECT * FROM tracks WHERE id=?',(track_id,)).fetchone()
+        row=c.execute('SELECT * FROM tracks WHERE id=%s',(track_id,)).fetchone()
         if row is None:raise HTTPException(404,'Track not found.')
         meta=json.loads(row['metadata'])
         if bool(meta.get('demo'))!=DEMO:raise HTTPException(404,'Track not found.')
         if row['status']=='failed' or (row['status']!='ready' and (library_only(c) or not row['source'] or not row['rights'])):
             raise HTTPException(409,'This track is not currently available to queue.')
         now=time.time()
-        if c.execute('SELECT COUNT(*) FROM requests WHERE listener=? AND created>?',(listener,now-60)).fetchone()[0]>=10:
+        if c.execute('SELECT COUNT(*) FROM requests WHERE listener=%s AND created>%s',(listener,now-60)).fetchone()[0]>=10:
             raise HTTPException(429,'Too many requests. Try again in a minute.',headers={'Retry-After':'60'})
-        c.execute("INSERT INTO requests(id,listener,query,mode,response,track_id,status,created) VALUES(?,?,?,'track',?,?,'pending',?)",
+        c.execute("INSERT INTO requests(id,listener,query,mode,response,track_id,status,created) VALUES(%s,%s,%s,'track',%s,%s,'pending',%s)",
                   (request_id,listener,query,f'Queued “{meta["title"]}”. Requests play before automatic selections when eligible.',track_id,now))
-        c.execute('DELETE FROM playlist WHERE track_id=?',(track_id,))
+        c.execute('DELETE FROM playlist WHERE track_id=%s',(track_id,))
         db.emit(c,'request:'+request_id,'request-downloads',{'kind':'request','track_id':track_id,'request_id':request_id})
-        return public(c.execute('SELECT * FROM requests WHERE id=?',(request_id,)).fetchone())
+        return public(c.execute('SELECT * FROM requests WHERE id=%s',(request_id,)).fetchone())

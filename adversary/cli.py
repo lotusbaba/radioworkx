@@ -63,8 +63,8 @@ def main():
     events = None
     if args.command == 'run':
         config = {key: getattr(args, key) for key in ('engine', 'scenario', 'agents', 'max_steps', 'timeout', 'headed', 'channel')}
-        if args.engine == 'scripted' and args.scenario != 'library-search':
-            parser.error('scripted supports only library-search; use a model engine for other goals')
+        if args.engine == 'scripted' and not SCENARIOS[args.scenario].search_kind:
+            parser.error('scripted supports search scenarios; use a model engine for other goals')
         if args.engine == 'custom' and args.decision_provider == 'jev':
             from adversary.inference.jev import credentials
             from adversary.inference.jev_service import JevDecisionService

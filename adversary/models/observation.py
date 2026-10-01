@@ -13,6 +13,7 @@ class BrowserElement(Contract):
     role: Annotated[str, Field(max_length=128)] = ""
     accessible_name: Annotated[str, Field(max_length=512)] = ""
     disabled: bool = False
+    current_value: Annotated[str, Field(max_length=512)] | None = None
 
 
 class BrowserObservation(Contract):

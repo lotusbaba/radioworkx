@@ -43,6 +43,7 @@ SNAPSHOT = r'''() => {
  return [...root.querySelectorAll('a[href],button,input:not([type=hidden]),textarea,select,[role=button]')]
  .filter(el=>el.checkVisibility() && !el.closest('[inert]')).slice(0,100).map(el=>({
  selector:path(el),tag:el.tagName.toLowerCase(), type:el.type||'', disabled:!!el.disabled,
+ current_value:el.type==='password'?null:(['INPUT','SELECT','TEXTAREA'].includes(el.tagName)?String(el.value).slice(0,512):null),
  options:el.tagName==='SELECT'?[...el.options].filter(o=>!o.disabled && !o.parentElement.disabled).map(o=>({value:o.value,label:o.label})):[],
  name:(el.getAttribute('aria-label')||el.labels?.[0]?.innerText||el.innerText||el.placeholder||'').slice(0,512)
  }));
@@ -105,11 +106,13 @@ class BrowserAdapter:
             eid = f'e{index}'
             locator = ElementLocator(observation_id=oid, element_id=eid,
                 alternatives=(LocatorAlternative(kind=LocatorKind.CSS, value=item['selector']),))
-            elements.append(BrowserElement(locator=locator, role=item['tag'], accessible_name=item['name'], disabled=item['disabled']))
+            elements.append(BrowserElement(locator=locator, role=item['tag'], accessible_name=item['name'], disabled=item['disabled'], current_value=item.get('current_value')))
             self.handles[eid] = await self.page.locator(item['selector']).element_handle()
         self.observation = BrowserObservation(id=oid, session_id=self.session_id, step=self.step,
             url=self.page.url, title=(await self.page.title())[:512],
-            visible_text=(await self.page.locator('body').inner_text())[:16384], elements=tuple(elements))
+            visible_text=(await self.page.locator('dialog[open]').last.inner_text()
+                          if await self.page.locator('dialog[open]').count()
+                          else await self.page.locator('body').inner_text())[:16384], elements=tuple(elements))
         self.recorder.write('observation', observation=self.observation.model_dump(mode='json'))
         return self.observation
 

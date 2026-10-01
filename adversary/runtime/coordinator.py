@@ -55,7 +55,7 @@ async def browser_use_page(playwright, directory, origin, headed, channel):
 
 
 async def oracle(adapter, scenario, start_url):
-    if scenario == 'library-search' and adapter.page.url != start_url:
+    if SCENARIOS[scenario].search_kind and adapter.page.url != start_url:
         adapter.find('search_navigation', 'Modal search navigated away from the home page before completion')
     if scenario == 'auth-popup' and adapter.page.url != start_url:
         adapter.find('auth_navigation', 'Authentication interaction navigated away from the starting page')
@@ -70,18 +70,19 @@ async def oracle(adapter, scenario, start_url):
                 adapter.find('duplicate_playlist', 'Duplicate trimmed playlist names accepted in one account')
 
 
-async def scripted(adapter):
+async def scripted(adapter, scenario=None):
+    scenario = scenario or SCENARIOS['library-search']
     from adversary.models.action import ClickAction, FillAction, SelectAction, DoneAction
     observation = await adapter.observe()
     target = next(e.locator for e in observation.elements if e.accessible_name == 'Search')
     await adapter.execute(ClickAction(target=target))
     await adapter.observe()
     target = next(e.locator for e in adapter.observation.elements if e.accessible_name == 'Search by')
-    await adapter.execute(SelectAction(target=target, values=('artist',)))
+    await adapter.execute(SelectAction(target=target, values=(scenario.search_kind,)))
     await adapter.observe()
     target = next(e.locator for e in adapter.observation.elements if e.accessible_name == 'Search text')
-    await adapter.execute(FillAction(target=target, value='QA Artist'))
-    await adapter.page.locator('.catalog-search-result').filter(has_text='QA Artist').first.wait_for()
+    await adapter.execute(FillAction(target=target, value=scenario.search_query))
+    await adapter.page.locator('.catalog-search-result').filter(has_text=scenario.search_result).first.wait_for()
     await adapter.execute(DoneAction(reason='Scripted search smoke complete'))
     return 'completed'
 
@@ -108,20 +109,21 @@ async def run_session(playwright, browser, directory, session_id, config, servic
                 adapter.input_bindings = dict(SCENARIOS[config['scenario']].fills)
                 await adapter.attach()
                 search_finished = asyncio.Event()
-                if config['scenario'] == 'library-search':
+                scenario = SCENARIOS[config['scenario']]
+                if scenario.search_kind:
                     adapter.goal_complete = search_finished.is_set
                 async def check_search(response):
                     parsed = urlsplit(response.url)
                     if (adapter.policy.allows(response.url) and parsed.path == '/api/library/search'
-                            and parse_qs(parsed.query).get('kind') == ['artist']
-                            and parse_qs(parsed.query).get('q') == ['QA Artist'] and response.status == 200):
+                            and parse_qs(parsed.query).get('kind') == [scenario.search_kind]
+                            and parse_qs(parsed.query).get('q') == [scenario.search_query] and response.status == 200):
                         try:
                             data = await response.json()
-                            if any(item.get('name') == 'QA Artist' for item in data.get('items', [])):
-                                await page.locator('dialog[open] .catalog-search-result').filter(has_text='QA Artist').first.wait_for(timeout=2000)
+                            if any(item.get('name') == scenario.search_result for item in data.get('items', [])):
+                                await page.locator('dialog[open] .catalog-search-result').filter(has_text=scenario.search_result).first.wait_for(timeout=2000)
                                 if (urlsplit(page.url).path == '/'
-                                        and await page.locator('#catalog-search-kind').input_value() == 'artist'
-                                        and await page.locator('#catalog-search-query').input_value() == 'QA Artist'):
+                                        and await page.locator('#catalog-search-kind').input_value() == scenario.search_kind
+                                        and await page.locator('#catalog-search-query').input_value() == scenario.search_query):
                                     search_finished.set()
                         except Exception:
                             pass
@@ -145,7 +147,7 @@ async def run_session(playwright, browser, directory, session_id, config, servic
                         await adapter.execute(NavigateAction(url=scenario.path))
                         # App scripts load data asynchronously; wait for the page's
                         # loading label to clear without networkidle (SSE/media).
-                        if config['scenario'] == 'library-search':
+                        if scenario.search_kind:
                             await page.locator('#open-catalog-search').wait_for()
                         original_execute = adapter.execute
                         async def checked(action, replay=False):
@@ -153,7 +155,7 @@ async def run_session(playwright, browser, directory, session_id, config, servic
                             await oracle(adapter, config['scenario'], start_url)
                         adapter.execute = checked
                         if config['engine'] == 'scripted':
-                            summary['termination'] = await scripted(adapter)
+                            summary['termination'] = await scripted(adapter, scenario)
                         elif config['engine'] == 'custom':
                             from adversary.engines.custom import run
                             summary['termination'] = await run(adapter, service, scenario.goal, scenario.values, config['max_steps'])
@@ -161,12 +163,15 @@ async def run_session(playwright, browser, directory, session_id, config, servic
                             from adversary.engines.browser_use import run
                             summary['termination'] = await run(adapter, native_session, service, scenario.goal, scenario.values, config['max_steps'])
                     summary['status'] = 'findings' if adapter.findings else 'no_findings'
-                    if config['scenario'] == 'library-search':
+                    if scenario.search_kind:
                         try:
                             await asyncio.wait_for(search_finished.wait(), 1)
                         except TimeoutError:
                             pass
                         summary['goal_achieved'] = search_finished.is_set()
+                        if search_finished.is_set() and replay is None and summary['termination'] == 'step_limit':
+                            recorder.write('completion', selection='deterministic', reason='goal_verified_at_budget_boundary')
+                            summary['termination'] = 'completed'
                         if not search_finished.is_set() and replay is None and summary['termination'] == 'completed':
                             summary.update(termination='goal_not_met', status='incomplete')
                     if summary['termination'] in ('step_limit', 'model_call_limit') and not adapter.findings:
@@ -186,6 +191,10 @@ async def run_session(playwright, browser, directory, session_id, config, servic
         # Exception bodies from SDKs may contain request details. Store type only.
         summary.update(status='harness_error', termination=type(error).__name__)
         recorder.write('harness_error', error_type=type(error).__name__)
+        from adversary.inference.jev import JevError
+        if isinstance(error, JevError):
+            # JevError contains only adapter-authored messages, never raw provider bodies.
+            recorder.write('provider_error', error_type='JevError', detail=str(error))
     finally:
         if adapter:
             summary['findings'] = adapter.findings

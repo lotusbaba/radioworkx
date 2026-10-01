@@ -50,6 +50,8 @@ async def run(adapter, browser_session, service, goal, values, max_steps):
         current_id = obs.id
         choices = {c.id: c for c in adapter.candidates(values)}
         return json.dumps({'observation_id': current_id, 'url': obs.url,
+            'fields': [{'name': e.accessible_name, 'value': e.current_value}
+                       for e in obs.elements if e.current_value is not None],
             'text': obs.visible_text, 'candidates': [{'id': c.id, 'description': c.description} for c in choices.values()]})
 
     @tools.action('Execute one QA candidate from the latest observation. Returns fresh observation and choices.')
@@ -59,6 +61,11 @@ async def run(adapter, browser_session, service, goal, values, max_steps):
         action = choices[candidate_id].action
         adapter.recorder.write('decision', engine='browser-use', observation_id=current_id, candidate_id=candidate_id)
         await adapter.execute(action)
+        await adapter.observe()
+        if getattr(adapter, 'goal_complete', lambda: False)() and not adapter.done:
+            from adversary.models.action import DoneAction
+            adapter.recorder.write('completion', selection='deterministic', reason='goal_verified')
+            await adapter.execute(DoneAction(reason='Framework verified goal completion'))
         if adapter.done:
             return ActionResult(is_done=True, success=True, extracted_content='Exploration ended; findings judged by harness.')
         return ActionResult(extracted_content=await snapshot())

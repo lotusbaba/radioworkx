@@ -9,6 +9,9 @@ class Scenario:
     values: tuple[str, ...]
     # Exact observed field labels -> one assigned value per independently run case.
     fills: tuple[tuple[str, str], ...] = ()
+    search_kind: str | None = None
+    search_query: str = ''
+    search_result: str = ''
 
 
 SCENARIOS = {
@@ -16,7 +19,7 @@ SCENARIOS = {
         'Starting on the home page, open the Search modal. Choose Artist in Search by, '
         'enter QA Artist in Search text, and verify QA Artist appears in the modal results. '
         'Stay on the home page and finish only after the matching result is visible.',
-        ('QA Artist',), (('Search text', 'QA Artist'),)),
+        ('QA Artist',), (('Search text', 'QA Artist'),), 'artist', 'QA Artist', 'QA Artist'),
     'auth-popup': Scenario('/',
         'Open Sign in. Switch to registration and back, try an invalid email, close the dialog with its close button, '
         'then reopen it. Verify visually that authentication remains an in-page dialog. Do not navigate away.',
@@ -45,3 +48,14 @@ SCENARIOS['playlist-duplicate-trimmed'] = replace(
     values=('qa-listener@example.invalid', 'synthetic-password-123', '  QA Playlist  '),
     fills=tuple((label, '  QA Playlist  ' if value == 'QA Playlist' else value)
                 for label, value in SCENARIOS['playlist-duplicate'].fills))
+
+for kind, name in [('album', 'QA Album'), ('track', 'QA Track')]:
+    SCENARIOS['search-'+kind] = replace(SCENARIOS['library-search'],
+        goal=f'From home, open Search, choose {kind.title()} in Search by, enter {name} '
+             f'in Search text and verify {name} is visible in modal results. Stay on home.',
+        values=(name,), fills=(('Search text', name),), search_kind=kind,
+        search_query=name, search_result=name)
+SCENARIOS['search-artist-typo'] = replace(SCENARIOS['library-search'],
+    goal='From home, open Search, choose Artist, enter QA Artst and verify the fuzzy '
+         'results include QA Artist. Stay on home.', values=('QA Artst',),
+    fills=(('Search text', 'QA Artst'),), search_query='QA Artst')

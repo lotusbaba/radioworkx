@@ -6,10 +6,14 @@ async def run(adapter, service, goal, values, max_steps):
     history = []
     for _ in range(max_steps):
         observation = await adapter.observe()
+        goal_complete = getattr(adapter, 'goal_complete', None)
+        if goal_complete is not None and goal_complete():
+            adapter.recorder.write('completion', selection='deterministic', reason='goal_verified')
+            await adapter.execute(DoneAction(reason='Framework verified goal completion'))
+            return 'completed'
         candidates = adapter.candidates(values)
         # A bounded strategy may prove completion independently. Until then,
         # finishing is not a legal action; never trust a model's success claim.
-        goal_complete = getattr(adapter, 'goal_complete', None)
         if goal_complete is not None and not goal_complete():
             candidates = tuple(c for c in candidates if not isinstance(c.action, DoneAction))
         request = DecisionRequest(id=f'{adapter.session_id}-request-{adapter.step}',

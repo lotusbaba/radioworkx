@@ -312,3 +312,23 @@ non-secret field values, and automatically stop when an independent completion c
 succeeds. Preserve recorded actions for model-free replay and distinguish incomplete
 exploration, application findings and harness/provider failures. Do not require a
 model to choose Finish after the framework has already verified the goal.
+
+### Focused observations and verified completion (2026-10-01)
+
+Implemented the next stage: observe the active dialog text and current non-password
+field values, supplying those fields to both custom model backends and Browser Use.
+Custom exploration stops before further inference once the independent goal oracle
+is satisfied; a goal verified at the final step boundary is also completed rather
+than mislabeled step_limit. Browser Use checks the goal after executed QA actions.
+Safe adapter-authored JevError details are recorded separately; provider bodies and
+credentials remain excluded.
+
+New independent goals: search-album, search-track, search-artist-typo, plus the existing
+library-search artist goal. All expose the page's dropdown choices and bind only text
+payloads. Scripted baselines support all four. No claim that new goals have yet passed
+with Laya/Jev: verification uses deterministic policies and scripted execution.
+
+All three roadmap areas remain relevant: broader goals, coordinated social sessions,
+and routing/generative fallback. This stage implements the prerequisite state and
+completion handling plus broader search goals. Shared-fixture social coordination
+and live fallback integration are subsequent stages, not implemented by this change.

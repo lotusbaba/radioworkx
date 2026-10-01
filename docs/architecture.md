@@ -650,3 +650,44 @@ XSS and SQLi case before Laya exploration. Stored/DOM cases depend on actual app
 Validate positive detector behavior through test-only controlled faults when needed,
 never by weakening application routes. Reports are advisory until the relevant oracle
 and replay are reliable enough for a release gate.
+
+## Goal-driven adversarial execution
+
+```text
+Scenario goal + assigned synthetic text inputs + step/call/time budgets
+                              |
+                              v
+                  Observe current page/modal <------------------+
+                  + field values + recent history               |
+                              |                                 |
+                              v                                 |
+                  Independent goal-completion check              |
+                     | verified       | not yet                 |
+                     v                v                         |
+               Record completion   Build observed actions       |
+               and stop            (all dropdown options)       |
+                                      |                         |
+                                      v                         |
+                              Decision model chooses            |
+                              action and target                 |
+                                      |                         |
+                                      v                         |
+                              Execute + record + oracles -------+
+```
+
+The model has no cross-request memory. Each request carries the goal, current state
+and recent action history. Six steps is a configurable experimental budget, not a
+fixed architecture rule. A successful click is execution evidence, not proof of goal
+completion. Known security inputs are enumerated by deterministic regression cases;
+model exploration supplements those cases with varied navigation/action sequences.
+Passwords are excluded from observed field values. Modal text is prioritized rather
+than allowing the home page's first 1,200 characters to hide the relevant state.
+
+Implementation order for the remaining roadmap:
+1. Focused state and verified completion; broaden independent artist/album/track/typo goals.
+2. Coordinated social sessions with shared fixtures, distinct identities and explicit barriers.
+3. Runtime routing and generative fallback with bounded budgets and the same execution guards.
+
+Steps2/3 require their own integration checks; existing isolated sessions are not
+shared-fixture multi-user coordination, and existing routing contracts are not a
+claim that live generative fallback has been integrated.

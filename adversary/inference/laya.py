@@ -107,7 +107,9 @@ class LayaDecisionService:
             raise ValueError('No bounded candidates; local custom agent cannot generate actions')
         state = {'goal': request.agent.goal, 'completed_actions': history[-5:],
                  'page': request.observation.title, 'url': request.observation.url,
-                 'visible_text': request.observation.visible_text[:1200]}
+                 'visible_text': request.observation.visible_text[:1200],
+                 'fields': [{'name': e.accessible_name, 'value': e.current_value}
+                            for e in request.observation.elements if e.current_value is not None]}
         # Hierarchical selection retains every candidate instead of truncating to
         # ten. Each actual model invocation consumes budget independently.
         if len(candidates) > 10:

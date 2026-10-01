@@ -1454,3 +1454,34 @@ no automatic retry or false completion claim. Dropdown choices Artist/Album/Trac
 verified in recorded Jev stages. Original reports preserved. Comparison:
 runs/all-options-search-comparison/review.html (+summary.json), linking both detailed
 agent-0 reports. No coordinated sessions, production changes or model/text-probe edits.
+
+## Commit/push and next adversarial stage (2026-10-01)
+
+User requested documentation, commit/push of accumulated work, and further stages.
+Added goal-driven architecture explanation: reconstructed context, per-goal budgets,
+assigned text inputs, observed dropdown choices and independent completion oracles.
+Committed accumulated changes as f448a6b and pushed origin/main. Initial automatic
+review rejected unverified default-branch push; then verified GitHub ADMIN permission,
+repo lotusbaba/radioworkx, unprotected main and synchronized history. Subsequent push
+approved/succeeded. Credential-value scan found no local secrets in staged content;
+.env, runtime reports, DBs and weights remain ignored.
+
+Next stage implemented: active-modal text, current non-password field values in
+observations/custom+Browser Use requests, automatic custom completion before another
+model call, verified completion at the last-step boundary, Browser Use post-action
+completion check, and safe JevError detail events. Added independent search-album,
+search-track,search-artist-typo goals, shared kind/query/result oracles and scripted
+baselines. No model reruns or production deployment this turn.
+
+Validation:168 non-browser framework tests passed (then6opt-in skipped, before adding
+three more browser cases). Seven new opt-in browser checks passed across final runs:
+four search goals, automatic completion both before/end-of-budget, focused values and
+password omission. Initial observation fixture mistakes corrected; six passed in
+runs/search-goals-stage.xml and the corrected field test passed in
+runs/search-field-observation.xml (the former retains its historical fixture failure).
+Application regression slice61passed,4opt-in skipped,8existing expected failures.
+
+User notes all roadmap areas are needed. Broader single-agent search goals now exist;
+shared-fixture coordinated social sessions and live model-routing/generative fallback
+remain subsequent integration work. No claim of their completion. Existing contracts
+and independent contexts do not constitute those integrations.

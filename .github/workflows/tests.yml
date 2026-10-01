@@ -39,7 +39,7 @@ jobs:
           --health-interval 5s --health-timeout 5s --health-retries 12
     env:
       TEST_DATABASE_URL: postgresql://radioworkx_test:local-test-only@127.0.0.1:55432/radioworkx_test
-      DATA_DIR: ${{ runner.temp }}/rwx-data
+      DATA_DIR: /tmp/rwx-data
       AWS_ACCESS_KEY_ID: testing
       AWS_SECRET_ACCESS_KEY: testing
       AWS_DEFAULT_REGION: us-east-1

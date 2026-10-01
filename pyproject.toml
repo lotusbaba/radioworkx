@@ -7,6 +7,12 @@ dependencies = ["fastapi>=0.115,<1", "uvicorn[standard]>=0.34,<1", "boto3>=1.36,
 
 [project.optional-dependencies]
 test = ["pytest>=8,<9", "fakeredis[lua]>=2.28,<3"]
+adversary = ["pydantic>=2.13,<3", "playwright>=1.62,<2", "python-dotenv>=1,<2", "fakeredis[lua]>=2.28,<3"]
+browser-use = ["browser-use==0.13.10"]
+laya = ["laya==0.3.21", "torch==2.14.1", "transformers==5.0.0", "huggingface-hub==1.4.1", "safetensors==0.8.0", "numpy==2.5.3"]
+
+[project.scripts]
+adversary = "adversary.cli:main"
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
@@ -17,7 +23,7 @@ requires = ["setuptools>=75"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["app*"]
+include = ["app*", "adversary*"]
 
 [tool.setuptools.package-data]
 app = ["schema.sql"]

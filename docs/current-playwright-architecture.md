@@ -1,7 +1,9 @@
 # Current Playwright architecture
 
 Phase 0 inspection, 2026-09-28. This describes repository evidence, not a browser
-test run. See [proposed architecture](architecture.md).
+test run. This inventory is historical: PostgreSQL has replaced SQLite and the
+[new agent framework](adversary-framework.md) now supplies async adapters, fixtures,
+recording and replay. See [architecture and roadmap](architecture.md).
 
 ## Inventory
 

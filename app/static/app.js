@@ -13,7 +13,7 @@ function showStatus(s){
   serverOffset=s.server_time*1000-Date.now();
   $('demo-banner').hidden=!s.demo;
   const play=s.play, m=play?.metadata || s.announcement?.metadata;
-  if(play?.track_id)window.Activity?.select(play.track_id,'live');
+  if(tuned&&play?.track_id)window.Activity?.select(play.track_id,'live');
   $('announcer-panel').hidden=!s.announcement;
   $('announcer-script').textContent=s.announcement?.script || '';
   $('announcer-source').hidden=!s.announcement?.source;
@@ -118,13 +118,13 @@ function reactionEvent(e){
 function tick(){
   if(autoplayBlocked)$('audio-status').textContent='Tap anywhere to enable sound — your browser blocked autoplay.';
   if(state?.announcement){
-    if(!autoplayBlocked)$('audio-status').textContent='AI announcer is introducing the next track. Music starts after the introduction.';
+    if(!autoplayBlocked&&!document.body.classList.contains('personal-playing'))$('audio-status').textContent='AI announcer is introducing the next track. Music starts after the introduction.';
     $('elapsed').textContent='INTRO';$('duration').textContent='—:—';$('progress').style.width='0%';return;
   }
   if(state && !state.play){
     const remaining=state.next_airtime?Math.max(0,Math.ceil(state.next_airtime-(Date.now()+serverOffset)/1000)):null;
     const waiting=remaining===0?'Eligible music is ready; waiting for the station to start. ':remaining!==null?`Next eligible music in ${time(remaining)}. `:`${state.station_status}. `;
-    if(!autoplayBlocked)$('audio-status').textContent=waiting+(tuned?'You’re tuned in; audio will start automatically.':'Tune in now to join when playback resumes.');
+    if(!autoplayBlocked&&!document.body.classList.contains('personal-playing'))$('audio-status').textContent=waiting+(tuned?'You’re tuned in; audio will start automatically.':'Tune in now to join when playback resumes.');
   }
   if(!state?.play){$('elapsed').textContent='0:00';$('duration').textContent='—:—';$('progress').style.width='0%';return;}
   const p=state.play,elapsed=Math.min(p.ends-p.starts,(Date.now()+serverOffset)/1000-p.starts);
@@ -136,6 +136,7 @@ function clearStall(){clearTimeout(stallTimer);stallTimer=null;}
 function stop(){clearStall();window.Activity?.emit('live.tune_out',{mode:'live'});playbackEpoch++;clearTimeout(reconnectTimer);reconnectTimer=null;reconnectAttempt=0;tuned=false;audio.pause();audio.removeAttribute('src');audio.load();document.body.classList.remove('playing');$('play-icon').textContent='▶';$('play-label').textContent='Tune in';$('audio-status').textContent='Live together, wherever you are.';}
 async function startPlayback(automatic=false){
   if(tuned)return;
+  document.dispatchEvent(new Event('live-playback-start'));
   autoplayBlocked=false;
   tuned=true;$('play-icon').textContent='■';$('play-label').textContent='Tune out';$('audio-status').textContent='Connecting to the live frequency…';
   window.Activity?.clicked(state?.play?.track_id||null,'live');
@@ -154,9 +155,10 @@ function enableAnalyser(){
     audioContext.resume().then(connect).catch(()=>{});connect();
   }catch{}
 }
+document.addEventListener('personal-playback-start',()=>{autoplayAttempted=true;autoplayBlocked=false;stop();$('audio-status').textContent='Live audio is off while you listen to My music.';});
 $('listen').onclick=()=>{if(tuned){stop();return;}startPlayback();};
 function unlockSound(event){
-  if(event.target.closest?.('#listen'))return;
+  if(event.target.closest?.('#listen, #my-music, #player, dialog, [data-auth-mode], [data-account-link], .save-actions'))return;
   if(autoplayBlocked)startPlayback(false);else if(tuned)enableAnalyser();
 }
 document.addEventListener('click',unlockSound,{capture:true});

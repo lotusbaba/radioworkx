@@ -1,4 +1,6 @@
 .venv/
+.venv-adversary/
+runs/
 __pycache__/
 .pytest_cache/
 .env
@@ -8,3 +10,4 @@ data/
 
 .admin-credentials
 .deploy/
+.models/

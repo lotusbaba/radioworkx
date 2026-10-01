@@ -1,0 +1,8 @@
+.catalog-search-dialog{width:640px;max-width:calc(100vw - 32px);max-height:calc(100dvh - 48px);box-sizing:border-box;overflow:auto}
+.catalog-search-dialog h2{font-size:1.7rem;margin:8px 36px 24px 0}
+.catalog-search-dialog .catalog-search-close{float:right;margin:-8px;background:transparent;color:#f0eee5;font-size:1.5rem}
+.catalog-search-dialog label{font-size:.9rem}.catalog-search-dialog input,.catalog-search-dialog select{font:inherit}
+.catalog-search-dialog #catalog-search-status{color:#b5beab;line-height:1.5}
+.catalog-search-result{display:block;padding:16px;margin:10px 0;border:1px solid #66754f;border-radius:8px;color:#f0eee5;text-decoration:none;overflow-wrap:anywhere}
+.catalog-search-result:hover{background:#303b26}.catalog-search-result strong,.catalog-search-result span{display:block}.catalog-search-result span{margin-top:8px;font-size:.85rem;color:#b5beab}
+.catalog-search-dialog :focus-visible{outline:2px solid #d5ef83;outline-offset:3px}

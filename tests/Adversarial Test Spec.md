@@ -3293,6 +3293,12 @@ Then wait for approval before proceeding to implementation.
 64. SECURITY QA AND BOUNDED PENETRATION TESTING — SCOPE ADDITION
 ======================================================================
 
+Required application coverage also includes login, registration, logout, personal
+playlists and saved likes. The concrete cases, boundary values, isolation fixtures,
+oracles and additional public-station scenarios are maintained in
+docs/adversarial-scenarios.md. Treat that catalog as part of this specification.
+Saved account likes are distinct from station emoji reactions; test both.
+
 Include application security testing alongside robustness exploration. This addition
 extends the MVP's scenario scope without changing the phase order or permitting
 arbitrary model-generated payloads/commands. The prohibition on destructive payload

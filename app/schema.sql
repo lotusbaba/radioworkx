@@ -1,3 +1,4 @@
+CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public;
 CREATE TABLE IF NOT EXISTS tracks (
  id TEXT PRIMARY KEY, metadata TEXT NOT NULL, source TEXT, rights TEXT,
  status TEXT NOT NULL DEFAULT 'available', duration DOUBLE PRECISION, path TEXT, error TEXT,
@@ -69,3 +70,10 @@ ALTER TABLE requests ADD COLUMN IF NOT EXISTS requested_genre TEXT NOT NULL DEFA
 CREATE INDEX IF NOT EXISTS reaction_listener ON reactions(listener,accepted);
 CREATE TABLE IF NOT EXISTS observer_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS observer_seen (id TEXT PRIMARY KEY, created DOUBLE PRECISION NOT NULL);
+-- Opt-in sharing: no changes to existing user or playlist records.
+CREATE TABLE IF NOT EXISTS listener_profiles (user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE, display_name TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS shared_playlists (playlist_id TEXT PRIMARY KEY REFERENCES user_playlists(id) ON DELETE CASCADE);
+CREATE TABLE IF NOT EXISTS listener_follows (user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, followed_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, PRIMARY KEY(user_id,followed_id), CHECK(user_id<>followed_id));
+CREATE TABLE IF NOT EXISTS playlist_follows (user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, playlist_id TEXT NOT NULL REFERENCES shared_playlists(playlist_id) ON DELETE CASCADE, PRIMARY KEY(user_id,playlist_id));
+CREATE INDEX IF NOT EXISTS listener_follow_target ON listener_follows(followed_id);
+CREATE INDEX IF NOT EXISTS playlist_follow_target ON playlist_follows(playlist_id);

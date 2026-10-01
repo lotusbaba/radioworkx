@@ -8,3 +8,6 @@ __pycache__
 .admin-credentials
 
 .deploy
+.venv-adversary
+.models
+runs

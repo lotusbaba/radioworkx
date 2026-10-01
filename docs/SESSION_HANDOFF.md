@@ -949,3 +949,508 @@ remain private and nonempty. Public health returns 200. No further database cuto
 steps remain. The migration implementation, station timing fix, tests, and operational
 docs are included in the PostgreSQL release commit; consult Git history for its
 revision and remote status. Separate adversarial-testing draft changes remain local.
+
+## Adversarial decision-routing slice (2026-09-29)
+
+User approved starting implementation after refining both engine diagrams and the
+hybrid Strategy 2 router. Added standalone `adversary` models for concrete actions,
+ordered locators, observations, immutable candidate snapshots, decision identity,
+per-strategy routing configuration and explicit remaining budgets. The pure Python
+DecisionRouter selects Laya for fully covered bounded choices (default ten max),
+LLM otherwise, or blocked when required models/budgets/configuration are unavailable.
+Malformed or stale requests fail validation. It never silently changes backends.
+Hosted model routing requires explicit opt-in. No model or browser calls occur.
+
+88 tests pass via `.venv/bin/python -m pytest tests/adversary --confcutdir=tests/adversary -q`.
+`.venv/bin/python -m adversary.inference.demo` prints three illustrative route outcomes.
+The nested test fixture bypasses the parent suite's PostgreSQL setup for domain tests.
+Added optional Pydantic dependency and adversary package discovery in pyproject.toml;
+production Docker sources and services are unchanged. No model weights downloaded.
+
+This is the first contracts/router slice, not completion of Phase 1 or either engine.
+Remaining run/result/failure, recording and security contracts are pending. Browser
+Use model-output mapping is still unverified; queue/executor, atomic budget accounting,
+ActionPolicy, QA environment, browser execution, recording/replay and both model
+integrations remain future work. Read the implementation status in docs/architecture.md.
+Preserved the user's existing diagram/spec edits; no commit, deployment or live data
+changes were made for this slice.
+
+## Modal authentication and home-page My Music (2026-09-29)
+
+User requested login/registration as a popup, My Music on the home page, and personal
+playlist playback that stops the listener's live audio, while retaining both routes.
+Implemented one reusable native dialog in music.js for login/register, form switching,
+Escape/close/backdrop dismissal and native focus restoration. Signed-out save actions
+open it without navigation and resume after authentication. Stale responses cannot
+write errors into a reopened form. Password inputs clear on close/mode change.
+
+Home now embeds the saved likes/playlists panel at #my-music, with a separate link to
+/my-music. Both standalone routes remain available. Scoped library/account scripts
+share rendering and the personal player without colliding with station globals.
+Starting a personal track cancels live reconnect/stall timers and clears live audio;
+Tune in cancels personal preparation/queue playback and clears its source. This only
+changes that listener's audio, not the station broadcast. Browser navigation still
+ends playback. Telemetry follows the selected audio element; background live-status
+updates cannot relabel personal playback. Save-button state stays synchronized.
+
+Verified isolated Chrome registration, login, likes, playlist creation/add/rename/
+remove, actual audio/automatic advance, both playback switches, cancellation of a
+pending preparation, mobile overflow, and independent route navigation. Existing
+AUTH-07 browser scenario passes normally after removing its now-obsolete expected-
+failure marker: repeated opening, Escape/focus restoration, ignored late errors,
+unchanged page/search state and uninterrupted audio. Other pending account scenario
+and adversary code were preserved. Existing live transition smoke also passes.
+Desktop/mobile modal, collection and player screenshots were visually inspected.
+
+Deployed API/frontend via normal rolling deployment to api-next, image
+`sha256:0be7787104a0291b430182b99130bdeaad7cadafb2c26155ace43513bcebb54e`.
+Public read-only Chrome verification passed inline collection, auth-mode switching,
+mobile dialog and standalone navigation with no JS errors. No production accounts
+or playlists were created for testing. Station and other workers were not restarted.
+Existing tabs need one refresh. These changes are not yet committed/pushed; preserve
+parallel adversary files and pyproject/documentation edits. The disposable PostgreSQL
+test service was already running at task start and was left available for that work.
+
+## Popup and landing-page adversarial follow-up (2026-09-29)
+
+Added AUTH-08 desktop/mobile mode-switch/password/focus/playback checks and HOME-01
+late-collection-response-after-logout check to tests/test_account_scenarios.py.
+Latest isolated Chrome run: 3 passed (existing AUTH-07 + both AUTH-08 viewports),
+1 failed (HOME-01), 8 duplicate-playlist cases deselected. HOME-01 releases a captured
+synthetic collection after logout; Music.user stays null and UI hides the collection,
+but Music.refresh assigns stale private playlists back to Music.data. This is a
+client-state invalidation bug, not verified cross-account exposure. Kept the test as
+a normal failure; app code was not changed. Remaining playback assertions after the
+failure were not reached. Native dialog focus may enter browser chrome; the focus
+check correctly forbids background page controls, not browser UI.
+
+Saved JUnit /tmp/radioworkx-adversarial-popup/report.xml and per-test trace.zip/final.png.
+Fixture now mocks live/status/SSE, patches API Redis to the existing fake, and saves
+artifacts via RWX_TEST_ARTIFACTS (defaults to the test's temporary directory). App and
+Chrome run locally; only PostgreSQL runs in the disposable container. Future QA app
+container remains pending. Updated scenario catalog/inventory: 88 contract/router
+cases + 12 account cases = 100 listed. Only the four browser cases ran in this check.
+
+## Shared playlists and listener following (2026-09-29)
+
+Implemented opt-in sharing in `app/social.py` with four additive PostgreSQL tables:
+`listener_profiles`, `shared_playlists`, `listener_follows`, `playlist_follows`.
+Existing playlists stay private. My Music's Share playlist publishes a playlist to
+`/playlists/{id}` and the owner's `/people/{id}` profile, with a copy-link action.
+Public names are editable; fallback names use a short account ID, never email.
+Public responses contain only public track metadata, owner ID/name and shared
+playlists. Likes, email addresses and lists of followed people remain private.
+
+Visitors can play shared tracks without signing in. Follow playlist opens the
+existing authentication modal if necessary and saves a live reference in My Music
+(on both home and standalone pages). Follower editing is disallowed. Owner changes
+appear on collection reload; already playing queues remain snapshots. Follow
+listener adds a profile link under Your public profile / Listeners you follow;
+it does not auto-follow playlists or send notifications. Both follow limits are
+100 and requests are idempotent. Make private and playlist deletion cascade-delete
+playlist follows. Republishing does not restore follows. Following people is
+independent. Public catalog recordings are still playable after playlist revocation;
+this revokes playlist visibility, not recordings already loaded by a visitor.
+
+`Music.refresh` now guards its combined collection/social responses with account
+and request generations, preventing stale responses from restoring private browser
+state after logout or replacing a newer refresh. Existing HOME-01 regression now
+passes without changing the test. Preserved unrelated adversary work.
+
+Verification: account/social API tests (6 passed), social tests including additive
+migration (3 passed), existing opt-in auth/logout browser regressions (4 passed,
+8 duplicate-name cases deselected), and expanded accounts_smoke passed. Chrome
+smoke uses two isolated accounts to verify publish, anonymous playback, in-modal
+registration to follow, listener following, owner-only editing, propagated rename,
+and revocation, plus existing desktop/mobile home playback and collection tests.
+Mobile shared page inspected; no JS errors. Test PostgreSQL container left running
+because it was already present. No production test accounts/playlists were created.
+
+For live rollout, `scripts/migrate_social.py` applies only new tables after checking
+the previous schema digest, with 3-second lock and 15-second statement timeouts.
+It records the new digest to avoid replaying unrelated schema DDL during rolling API
+startup. Private `.deploy/social-migrate.py` supplies the existing ignored local
+connection configuration. Migration applied successfully to the current Homebrew
+PostgreSQL radioworkx database; no existing records changed. Normal rolling API
+controller is used; station and other workers remain untouched, downloads remain
+stopped and video generation stays disabled.
+
+Rollout completed to `api`, image
+`sha256:ac1bb00ac1ea80680dd43f41f56aafd4c5d97ca8781037e57e13ca0bd108d206`;
+previous `api-next` drained and stopped. Public health, new routes, correct anonymous
+404 messages, and mobile sign-in modal passed a read-only Chrome check with no JS
+errors. Changes remain uncommitted, including the earlier modal/home feature.
+
+## Social adversarial coverage completed (2026-09-29)
+
+Implemented all SOC-01–SOC-12 families: 41 API cases in test_social_adversarial.py
+and 13 Chrome cases in test_social_browser.py. Covers follow/revocation races,
+republish semantics, concurrent quota boundaries, delayed follow/rerender, both
+halves of delayed music/social refresh across logout/account switch/newer request,
+owner-only mutations, disappearing follows mid-read, public-data canaries and inert
+XSS markers, canceled/retried auth-to-follow, clipboard denial/repeated copy, every
+social mutation's origin/header/revoked-session enforcement, and revocation on
+fresh reads/history. Tests reuse the existing fixture with synthetic identities.
+
+Found/fixed SOC-07: collection now omits a followed playlist revoked/deleted between
+READ COMMITTED queries instead of returning 404 for the entire collection; non-404
+errors still propagate. Found/fixed SOC-10: copy-link fallback now coalesces pending
+clipboard operations and reuses one open dialog instead of stacking modals.
+The accountEpoch/refreshEpoch guard already added by the social feature was preserved
+and verified by six cases plus HOME-01; no duplicate implementation was introduced.
+
+Consolidated affected-suite verification: 153 passed, 8 xfailed, no unexpected
+failures. Includes all 54 new social cases, 88 router/domain cases, 12 account cases,
+and seven existing account/social regression cases. The 8 expected failures are
+PL-07 duplicate playlist names, still not fixed by this task. Node syntax checks and
+git diff --check passed. Inventory now lists 154 adversarial cases plus seven existing
+regressions used for verification. Report: /tmp/radioworkx-social/report.html and
+report.xml; per-browser-case final.png/trace.zip under browser/<test-name>/.
+
+Browser audio initially stayed at time zero with the host output sink. QA fixtures
+now use silent (muted) synthetic 22.05 kHz WAV, with real media-clock progression
+and pause/restart-event assertions. A trial host FFmpeg conversion was removed
+because FFmpeg is only available in app containers; no new dependency was installed.
+App and Chrome still run locally, PostgreSQL in the disposable test container.
+No production state touched, no deployment/commit from this task. Existing social,
+modal/home, schema and migration work was preserved. These two additional fixes
+need the normal API/frontend deployment when requested.
+
+## OpenAI custom and Browser Use framework (2026-09-29)
+
+Implemented runnable `python -m adversary` / `adversary` CLI: run, replay, inspect,
+list-runs and list-scenarios. Both the custom observe/candidate/decision loop and
+native Browser Use 0.13.10 agent use the existing OpenAI key, selected from only
+OPENAI_API_KEY/OPENAI_CHAT_MODEL in ignored .env or environment. No credentials
+were copied into source, artifacts or browser/app environments. Custom uses strict
+Responses candidate output; Browser Use uses its ChatOpenAI adapter with registered
+qa_choose/qa_observe/done tools and all default tools disabled. Both use the shared
+serialized DecisionService with atomic global call budget and no provider retries.
+The existing Laya router remains separately tested; neither runner loads Laya or
+implements the proposed hybrid model adapter. Do not describe the full phase
+roadmap as complete.
+
+New runtime modules create synthetic QA app subprocesses, ephemeral PostgreSQL
+schemas, fake Redis/status/SSE and synthetic silent audio. `DEMO_MODE=1` requires
+fixture metadata demo=True; v2 readiness checks now verify the artist is visible.
+All browser requests are restricted to the exact per-session origin; live port8001
+is forbidden. Custom agents share Chrome with isolated contexts; Browser Use gets
+a temporary Playwright-launched process/profile and CDP attachment. Playwright
+owns launching because pinned Browser Use ignores its profile.env when spawning.
+This keeps service credentials out of Chrome; service workers are blocked up front.
+App and browsers run locally; only PostgreSQL is containerized. No workers/live
+DB/media/deployments touched. Test PostgreSQL was already running and remains up.
+
+Action intents are fsynced before execution, followed by results, observations,
+findings, final screenshot, trace.zip and JSON/HTML reports. Replay validates journals,
+rejects unknown interrupted outcomes and incompatible fixture versions, remaps only
+validated QA navigation, starts fresh data and uses Playwright without any model.
+Finding reproduction requires matching fingerprints; a no-finding smoke replay is
+not claimed as a reproduced bug. Status/exit codes distinguish findings, harness
+errors, budget/time limits and completed exploration. Available goals: library
+search, auth popup, duplicate playlists and social sharing. They do not replace
+all existing deterministic adversarial regressions or assert all their invariants.
+
+Installed dependencies only in ignored .venv-adversary, declared optional extras
+in pyproject.toml and kept app/prod venv unchanged. Browser Use is pinned0.13.10;
+verified Playwright1.63, OpenAI SDK2.26, Python3.13.3. pip check passes. runs/ ignored.
+Read docs/adversary-framework.md for commands, policy/coverage limits and references;
+docs/architecture.md now distinguishes runnable OpenAI paths from the Laya roadmap.
+Historical current-playwright-architecture.md is labeled accordingly.
+
+Final verification: 126 passed =119 framework tests (88existing +29runtime +2real
+browser integration) +7existing account/social API regressions. JUnit:
+runs/framework-tests.xml. Browser integration verifies two isolated simultaneous
+fixtures, model-free replay, stale target rejection and blocked off-origin redirects.
+Both live OpenAI engine smoke checks against fixturev2 completed library search
+with three calls and four recorded actions each. Browser Use's actions replayed
+with zero model calls. Artifacts: runs/framework-custom-verified/agent-0/,
+runs/framework-browser-use-verified/agent-0/ and runs/framework-browser-use-replay/agent-0/.
+Earlier smoke directories used fixturev1, whose seed was hidden by the demo filter;
+those are historical and intentionally cannot replay asv2. Screenshot inspection
+confirmed QA Artist search and the seeded result in the final Browser Use run.
+No full model-driven social/auth scenario run or Laya verification claimed.
+
+## Custom agent switched to local Laya (2026-09-30)
+
+User clarified custom must use Laya, with OpenAI remaining only for Browser Use.
+Implemented adversary/inference/laya.py (offline local backend, one shared model,
+bounded100-request asyncio queue and one executor thread), download_laya.py
+(explicit pinned five-artifact download, checksum manifest), custom CLI routing,
+--laya-model/--device flags and custom-laya decision telemetry. CLI custom no longer
+reads .env/OpenAI credentials; missing models fail with the download command, never
+fall back. Each hierarchy inference (at most10choices) consumes the call budget.
+Canceled results are discarded, native inference remains serialized and shutdown
+waits for it while rejecting queued jobs. Model artifacts ignored under .models/.
+
+Installed Laya0.3.21, torch2.14.1, transformers5.0.0, huggingface-hub1.4.1,
+safetensors0.8.0 and numpy2.5.3 only in .venv-adversary; optional extra versions
+pinned in pyproject.toml. Initial latest HF dependencies changed Click; pinned hub
+and restored Browser Use's click8.3.3. Final pip check passes. English checkpoint
+convaiinnovations/laya revision55cf4c4ebb4ebe31b2550e8bdf3bd21b99753851 downloaded
+successfully (~820MiB). No production dependency/runtime state changed.
+
+Offline CPU load and prediction verified with socket.connect blocked plus HF and
+Transformers offline modes. Cold load26.6s, inference1.5s, peak process RSS1.14GB.
+MPS option exists but was not benchmarked. Upstream warns about calibration for
+>10choices; adapter never submits that many choices. Answer confidence is model
+probability, not browser-testing accuracy. Custom loads on demand per run, not a
+persistent server. New tests verify hierarchy, thread serialization/nonblocking,
+budgets, canceled requests, invalid labels, cache corruption, no OpenAI credential
+access, bounded queue and shutdown. Combined framework + account/social regression
+suite:136passed; runs/laya-tests.xml. Browser Use itself was not rerun with paid calls.
+
+Actual browser quality is LIMITED: first CPU smoke and first two-agent run chose
+Done immediately. These are historical runs/laya-custom-cpu and laya-custom-two-agents,
+not successful searches. Added independent library-search completion checkpoint:
+require successful q=QA Artist response containing QA Artist; custom excludes Done
+until that checkpoint. Reports now expose goal_achieved and goal_not_met as needed.
+Final two-agent run runs/laya-local-verified uses one model,24localcalls,7actions per
+session (initial navigation +6reloads), both incomplete/step_limit, no findings,
+goal_achieved false. Do not claim Laya completed the task or passed the adversarial
+scenarios. Core integration works, but model action-selection quality needs tuning.
+README, architecture, framework and Laya docs updated to distinguish these facts.
+
+## Single-candidate selection fix and review pause (2026-09-30)
+
+User authorized this fix first and explicitly forbade coordinated-session work
+until reviewing a fresh report and approving. Do not resume coordinated sessions
+or additional scenarios without that approval. No changes to either were made.
+LayaDecisionService now resolves any sole candidate before budget reservation or
+backend invocation, recording selection=deterministic/reason=sole_candidate with
+no confidence or inference_ms. Multiple-option calls record selection=model.
+Added sole-candidate zero-budget/no-backend and Reload-to-a14 one-call regressions;
+adjusted hierarchy test to count only model stages. 129 passed,2browser tests
+skipped. Fresh actual CPU run: runs/laya-single-candidate-fix, one agent,six steps,
+six local calls (previously12), six direct resolutions, no single-option confidence.
+Still incomplete: six reloads, search goal false; not claimed as a quality fix.
+Review report: runs/laya-single-candidate-fix/review.html with stage table, actual
+operation confidences, direct-selection labels and links to raw records/trace.
+Historical reports preserved. No new hosted calls, scenarios or coordinated sessions.
+
+## Full Laya choice probabilities recorded (2026-09-30)
+
+User requested recording probabilities for remaining choices and a fresh report.
+Scope remains paused for coordinated sessions/additional scenarios until approval.
+LayaBackend returns the full upstream probabilities map; the service validates
+choice membership, finite [0,1] values and rounded sum near1 before recording it.
+Model stages retain probabilities plus selected-answer confidence; deterministic
+single-candidate stages still have neither. Recorder renders ranked per-stage
+probability tables above raw events; it does not fabricate missing historical data.
+Tests cover actual backend extraction through JSONL/HTML and invalid distributions.
+135passed,2opt-in browser tests skipped; runs/laya-probability-tests.xml.
+
+Fresh actual local CPU run runs/laya-choice-probabilities: one agent,six modelcalls,
+six deterministic resolutions, initial navigation plus six reloads; incomplete,
+step_limit,goal_achieved false. Verified all recorded distributions have the exact
+choice keys and selected probability agrees with answer_confidence. First decision:
+click19.12%,fill14.00%,key_press8.31%,reload39.69%,wait9.93%,scroll8.96%.
+Fresh readable report: runs/laya-choice-probabilities/review.html; session report
+and raw actions.jsonl under agent-0. No hosted calls or scenario/session changes.
+
+## Search-goal wording diagnostic (2026-09-30)
+
+User asked what goal is sent, whether Laya infers it correctly, and for a simple-text/
+paragraph-goal test. Added scripts/laya_goal_probe.py, a standalone CPU text diagnostic
+using the current backend/choices and socket connections blocked. No browser,
+production changes, goal configuration changes, coordinated sessions or added
+application scenarios. Output: runs/laya-goal-wording/review.html, summary.json and
+results.jsonl, including every exact input, choice and probability distribution.
+Compared current/simple/paragraph goal wording under two fixed states (empty field
+expects fill; QA Artist already filled expects click Search). State explicitly
+includes field contents unlike the real browser prompt, so differences from older
+browser runs cannot be attributed solely to goal wording. Seventh case uses the
+paragraph as plain text, also changing input format. Expectations not sent as answer
+labels. One prediction per case, not a reliability benchmark.
+Results:0/7expected actions. Current goal selects reload for both states (.5481/.3810);
+simple goal wait (.4615/.3377); paragraph wait (.5524/.6213). Plain-text paragraph
+with empty field selects reload (.8147). Clearer wording did not fix selection.
+Do not claim this proves internal understanding or identifies the root cause;
+shows unreliable next-action selection in this configuration. Syntax/diff checks
+and JSON evidence verification passed. Broader work remains paused for approval.
+
+## Hosted Jev search-goal comparison (2026-09-30)
+
+User supplied the exact Jev endpoint and authorized use of their ignored .env key
+for the same troublesome scenarios. Added adversary/inference/jev.py and
+scripts/jev_goal_probe.py, plus separate test_jev.py and test_jev_goal_probe.py
+under tests/adversary (18 tests passed). The client uses only
+https://jev-ai.pro/api/v1/systemone, accepts JEV_AI_API_KEY or legacy JEV_API_KEY,
+and never follows redirects, retries or falls back to another provider. Errors
+omit raw provider bodies and headers. Credentials are not copied to reports.
+
+Fresh hosted run: runs/jev-goal-wording/review.html, summary.json, results.jsonl.
+All seven calls completed; Jev selected expected fill/click in 7/7 cases versus
+local Laya's 0/7 on exactly matching states/choices. Reports retain all choice
+probabilities and distinguish selected_probability from provider_confidence.
+Seven text-only inputs reuse the existing Laya diagnostic; no browser executed,
+no production changes, no full browser-backend switch. Custom defaults remain
+Laya. Coordinated sessions and broader scenario additions remain paused pending
+user review. See docs/adversary-framework.md for repeat-run commands.
+
+## Laya Browser default swap (2026-09-30)
+
+User approved swapping the local model. Default download and service identity now
+use cklxx/laya-browser v19s at 645cf366a2ae35f1086e8c20eff48f909bb49206.
+Downloaded five checkpoint artifacts into ignored .models/laya-browser/<revision>;
+existing base checkpoint remains untouched. Uses installed laya.Agent, no upstream
+remote Python execution. Generic prompt/hierarchy retained to isolate the model
+change; upstream model-specific decide adapter has NOT been integrated.
+
+Fresh seven-case report runs/laya-browser-goal-wording/review.html: CPU inference
+with socket connections blocked, 3/7 expected actions. Filled-field cases chose
+click; empty-field cases chose key_press. Cold load ~8.5s. Previous Laya 0/7 and
+Jev 7/7 reports preserved. Real isolated QA run runs/laya-browser-search/report.html:
+incomplete/time_limit, initial navigation plus three clicks, last click TimeoutError,
+six model calls. Did not enter search text or establish search completion. This is
+not a successful browser test. Framework suite 153passed,2skipped; diff check passed.
+No coordinated sessions or additional application scenarios; those remain paused.
+
+## Home-page catalog search modal (2026-09-30)
+
+User requested preserving Artists/Albums landing pages and adding a home Search
+button opening a modal for artist/album/track fuzzy search. Added search.js/search.css
+and GET /api/library/search (registered before dynamic library routes). Search runs
+in PostgreSQL via pg_trgm similarity + word_similarity, with literal substring
+matches, exact matches ranked first, deduplicated entities, max25 results and total.
+Empty/whitespace query returns no results. Demo/live visibility stays separated.
+Catalog metadata remains in existing tracks rows; no parallel search store to sync.
+Schema now installs pg_trgm in public; deployment DB role needs database CREATE
+privilege or an administrator must install it beforehand. Normal db.init applies
+the schema update. This was implemented/tested locally, not deployed to production.
+
+Modal uses native dialog focus/Escape handling, labeled type/text controls, 250ms
+debounce, request abort/version guards, safe text rendering and clear no-match/error
+states. Opening/searching/closing does not navigate or interrupt playback; selecting
+an artist/album result navigates to its existing page. Track results open their album
+page. Search scans the bounded catalog (currently capped at10k tracks); no trigram
+index is added over the dynamically expanded artist arrays. Existing browsing routes
+remain unchanged. New tests: tests/test_catalog_search.py and
+tests/test_catalog_search_browser.py; browser artifacts runs/catalog-search-tests/.
+
+Verification:17 API/library tests passed;2 real Chrome tests passed (desktop/mobile),
+including continued live media playback. Mobile screenshot reviewed; JS syntax and
+git diff checks passed. No live deployment or coordinated agent sessions performed.
+
+## Search modal deployed (2026-09-30)
+
+User authorized deployment. Applied pg_trgm in public and refreshed schema digest
+with bounded lock/statement timeouts. Active image schema exactly matched the
+pre-search source; DB marker was pre-social (older worker), social tables existed;
+reapplied only idempotent additive social DDL plus extension, preserving records.
+Rolling controller switched api -> api-next and drained/stopped old API. Active image
+sha256:d3a7156d42edb6302cb77962d493f8e88b37fc04a0f6cabcb9487b2adf19b901.
+Previous image retained for rollback; station/workers not restarted. Docker context
+now excludes local model weights, adversary venv and reports.
+Public Chrome verification passed: home modal initially empty, real artist query
+returns its card, artist/album/track search endpoints HTTP200, close button and
+Escape with empty input work. Chrome first clears a populated type=search field on
+Escape; initial smoke expected immediate close and was corrected to native behavior.
+Screenshot: runs/catalog-search-deploy/live-search.png. Proxy confirmed api-next;
+no pending drain/switch state. No production accounts or playlists created.
+
+## Adversarial search tests revised for home modal (2026-09-30)
+
+library-search now starts at home, opens Search, chooses Artist and fills QA Artist.
+Completion requires matching artist response plus visible modal result, current
+query/type and home URL. Navigation during this goal produces search_navigation.
+Dropdown options are now bounded SelectAction candidates; modal observations exclude
+background controls. Scripted baseline updated to open/select/fill/done; recorded
+navigation plus four actions. Frozen old seven-case text probe goal so historical
+Jev/Laya comparisons remain reproducible instead of silently inheriting new workflow.
+
+Added SEARCH-01..05 in docs/adversarial-scenarios.md and five adversarial browser
+cases covering input attacks, type boundaries, stale query/type/close responses and
+503 recovery. Search tests:19passed (12 API +7 Chrome including desktop/mobile
+playback). Framework:154passed,2 opt-in tests skipped; coordinated sessions still
+paused. Updated existing two-session test expectations but did not run that test.
+Single scripted run completed with goal_achieved true and zero model calls; fresh
+single-session replay also completed with goal_achieved true. No new Laya/Jev
+browser evaluation or production deployment this turn.
+Reports: runs/search-adversarial/review.html, runs/search-modal-scripted/report.html,
+runs/search-modal-replay/report.html. JUnit: runs/search-adversarial/results.xml.
+
+## Laya Browser run on home search modal (2026-09-30)
+
+User requested running Laya after search revisions. One isolated custom CPU session,
+six action-step limit,18 model-call budget,180s timeout. Report:
+runs/laya-browser-search-modal/report.html (detailed agent-0/report.html).
+Result incomplete/step_limit, goal_achieved false,12 local model calls, no findings.
+After initial home navigation: open Search modal, click Search submit on empty input,
+press Enter in Search text, click Search submit three more times. No fill action;
+query remained empty. Seven recorded actions includes initial framework navigation.
+No hosted calls, coordinated sessions, production mutations or code changes.
+
+## Jev real browser search (2026-09-30)
+
+User requested Jev run. Added explicit --decision-provider jev for custom engine;
+Laya remains default. JevDecisionService reuses bounded Laya hierarchy/worker using
+hosted backend, records correct custom-jev labels and provider metadata, preserves
+sole-candidate bypass.34 adapter tests passed; diff check passed. Same six steps,
+18-call cap,180s timeout and one isolated QA session as preceding Laya run.
+Actual run runs/jev-search-modal/agent-0/report.html: open modal, select Artist,
+fill QA Artist, then wait three times. Independent oracle verified visible matching
+result: goal_achieved true. Agent did not select Done despite its availability in
+last two requests; stopped at step_limit, status incomplete.10 hosted calls to
+user-authorized jev-ai.pro endpoint. Not a fully completed agent run. No text-only
+probe rerun, coordinated sessions, production mutations or deployment.
+
+## Deterministic input assignments reviewed across scenarios (2026-10-01)
+
+User asked to eliminate unnecessary model decisions over known test values. Added
+Scenario.fills/selects assignments and applied them via coordinator to common browser
+candidate builder (custom Laya/Jev and Browser Use). Each configured field gets one
+assigned value; unknown fields get no speculative fill. Search kind fixed to artist;
+known playlist label resolves observed option ID. Model still chooses actions and
+ambiguous targets; existing sole_candidate selection skips inference with no fake
+confidence. Input selection is no longer a field × all scenario values cross-product.
+Exact/trimmed duplicate-name exploration split into independent scenario IDs; trimmed
+variant uses existing duplicate oracle. Existing security and PL-07 deterministic
+regressions continue to enumerate inputs independently, not random model coverage.
+
+Added tests/adversary/test_input_bindings.py covering every scenario's mappings,
+unknown fields, dropdown values, dynamic playlist IDs, separate duplicate cases and
+zero-call deterministic selection. Framework suite164passed,2opt-in skipped. Single
+scripted QA browser runs/search-deterministic-inputs completed,goal_achieved true,
+zero model calls. No hosted model reruns, coordinated sessions or deployment.
+
+## Laya/Jev runs with assigned search inputs (2026-10-01)
+
+User requested both runs. Sequential independent single-agent QA browser sessions,
+six action steps,18 model-call cap,180s timeout. Laya Browser:9 local calls; Jev:8
+hosted calls to configured endpoint. Both goal_achieved true, incomplete/step_limit:
+neither selected Finish. Laya actions: Enter on Playback volume, open Search, Enter
+on empty Search text, fill QA Artist, Enter, select Artist. Jev: open Search, select
+Artist, fill QA Artist, Enter, wait, wait. No application findings reported.
+Smaller assigned-input candidate set fits modal decisions in one model call choosing
+the concrete action; no redundant payload-selection calls or deterministic second
+stages were recorded (0 deterministic stages for both). Values remain scenario-assigned.
+One run per provider is not a reliability benchmark. No coordinated sessions or
+production changes. Reports runs/laya-deterministic-search/agent-0/report.html and
+runs/jev-deterministic-search/agent-0/report.html; side-by-side summary and exact action
+lists runs/deterministic-search-comparison/review.html (+summary.json).
+
+## Restore observed dropdown choices (2026-10-01)
+
+User corrected deterministic input scope: all dropdown options observed on the page
+must be offered to the model. Removed Scenario.selects and coordinator/select candidate
+filtering. Search now offers Artist, Album, Track; playlist dropdowns preserve all
+observed enabled labels and actual option IDs. Text input bindings remain deterministic
+(e.g. QA Artist only, no competing XSS/empty payload). Shared candidate builder applies
+to both custom providers and Browser Use. Existing disabled-option filtering remains.
+Updated regression expectations for complete dropdown choices and unchanged assigned
+text. Framework164passed,2opt-in skipped; diff check passed. No model reruns or deploy;
+prior HTML reports remain historical and still show the previously restricted choices.
+
+## Both models rerun with all dropdown options (2026-10-01)
+
+User requested runs. Separate single-agent sessions, six steps,18 call cap,180s.
+Laya runs/laya-all-options-search: goal_achieved true,incomplete/step_limit,10 calls.
+Steps Enter volume,open Search,Enter empty search,fill QA Artist,select Artist,click Search.
+Jev runs/jev-all-options-search: harness_error/JevError,6 calls attempted. Opened
+Search,selected Artist,filled QA Artist; next inference failed. Existing exception
+handling retained only JevError type, not safe error detail, so root cause unknown;
+no automatic retry or false completion claim. Dropdown choices Artist/Album/Track
+verified in recorded Jev stages. Original reports preserved. Comparison:
+runs/all-options-search-comparison/review.html (+summary.json), linking both detailed
+agent-0 reports. No coordinated sessions, production changes or model/text-probe edits.

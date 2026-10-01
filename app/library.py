@@ -72,6 +72,44 @@ def library_page(request:Request,entity:str|None=None):
     return listener_page(request,(STATIC/'library.html').read_text())
 
 
+@router.get('/api/library/search')
+def search_catalog(kind:Literal['artist','album','track']='artist', q:str=Query('',max_length=200)):
+    query=q.strip()
+    if not query:return {'items':[], 'total':0}
+    # Fixed SQL fragments only; all user input is bound as parameters. Keep the
+    # demo boundary identical to the browsing catalog. No private fields leave SQL.
+    entries={
+        'artist': "SELECT artist AS name, artist AS identity, meta FROM base CROSS JOIN LATERAL jsonb_array_elements_text(meta->'artists') AS artist",
+        'album': "SELECT COALESCE(NULLIF(meta->>'album',''),'Unknown album') AS name, COALESCE(NULLIF(meta->>'album_id',''),jsonb_build_array(meta->>'album',meta->'artists')::text) AS identity, meta FROM base",
+        'track': "SELECT meta->>'title' AS name, id AS identity, meta FROM base",
+    }
+    sql="""WITH base AS (
+        SELECT id, metadata::jsonb AS meta FROM tracks
+        WHERE COALESCE((metadata::jsonb->>'demo')::boolean,false)=%s
+    ), entries AS ("""+entries[kind]+"""), scored AS (
+        SELECT *, greatest(public.similarity(lower(name),lower(%s)),
+                           public.word_similarity(lower(%s),lower(name))) AS score,
+               lower(name)=lower(%s) AS exact,
+               strpos(lower(name),lower(%s))>0 AS contains
+        FROM entries
+    ), matched AS (
+        SELECT DISTINCT ON (identity) * FROM scored
+        WHERE contains OR score>=0.5 ORDER BY identity, exact DESC, score DESC, name
+    ) SELECT name, identity, meta, count(*) OVER() AS total FROM matched
+      ORDER BY exact DESC, contains DESC, score DESC, lower(name), identity LIMIT 25"""
+    with db.connect() as c:
+        rows=c.execute(sql,(DEMO,query,query,query,query)).fetchall()
+    items=[]
+    for row in rows:
+        meta=row['meta']
+        ref=artist_ref(row['name']) if kind=='artist' else album_ref(meta)
+        url=('/artists/' if kind=='artist' else '/albums/')+ref['id']
+        items.append({'id':row['identity'] if kind=='track' else ref['id'],
+                      'name':row['name'],'kind':kind,'url':url,
+                      'artists':meta['artists'] if kind!='artist' else []})
+    return {'items':items,'total':rows[0]['total'] if rows else 0}
+
+
 @router.get('/api/library/{kind}')
 def directory(kind:Literal['artists','albums'],q:str=Query('',max_length=200),page:int=Query(1,ge=1),page_size:int=Query(24,ge=1,le=100)):
     with db.connect() as c:tracks=inventory(c)

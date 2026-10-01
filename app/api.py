@@ -39,6 +39,8 @@ from app.library import router as library_router
 app.include_router(library_router)
 from app.accounts import router as accounts_router
 app.include_router(accounts_router)
+from app.social import router as social_router
+app.include_router(social_router)
 from app.telemetry_api import router as activity_router, ActivityMiddleware
 app.include_router(activity_router)
 from app.activity_admin import router as activity_admin_router

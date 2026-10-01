@@ -21,8 +21,8 @@ Evidence below refers to files at that revision:
 ## Selected approach
 
 Use a single `laya.Agent`, backed by PyTorch/Transformers, wrapped by our
-`LayaBackend`. Start with the English `convaiinnovations/laya` checkpoint for this
-English application. Avoid automatic Router checkpoint selection: it can keep
+`LayaBackend`. The default is now `cklxx/laya-browser` (v19s), replacing the
+general English `convaiinnovations/laya` checkpoint. Avoid automatic Router checkpoint selection: it can keep
 multiple checkpoints resident. There is no need for a local HTTP server initially.
 
 Verified interface, illustrative only:
@@ -103,3 +103,40 @@ Before integration acceptance: pin/download one checkpoint, verify disconnected
 loading, measure RAM and CPU/MPS latency, validate label mapping, then run one, two
 and five agents. Zero-shot browser exploration quality is unproven and needs
 comparison against scripted/seeded random choices. Never substitute a hosted model.
+
+## Implemented local backend (2026-09-30)
+
+The research above is historical. `adversary/inference/laya.py` now implements
+LayaBackend and LayaDecisionService. Custom CLI runs use this backend exclusively;
+Browser Use remains on OpenAI. Install the optional `laya` extra and run
+`python -m adversary.inference.download_laya` once. Runtime/checkpoint versions
+are pinned separately; model revision is `645cf366a2ae35f1086e8c20eff48f909bb49206`.
+The five required artifacts are cached under ignored `.models/laya-browser/<revision>`;
+a checksum manifest is validated before offline loading. No weights are committed.
+This swap keeps the existing generic question format and hierarchy for a controlled
+checkpoint comparison; it does not adopt the upstream model-specific `decide` adapter.
+Historical base-model weights and reports remain in place. Its manifest is rejected
+by the new default validator rather than mislabeled as Laya Browser.
+
+One lazily loaded CPU model serves the bounded asyncio queue through one dedicated
+executor thread. Hierarchical operation/group/candidate selection retains the full
+candidate set while limiting each inference to ten choices. Every hierarchy call
+consumes the shared budget. Queue and per-stage inference timings, selected labels,
+actual device and answer_confidence are recorded. Canceled callers cannot execute
+late results; the worker finishes native inference before accepting the next job.
+Shutdown rejects waiting jobs and waits for the active call.
+
+Offline CPU loading and prediction passed with socket.connect patched to reject
+all outbound connections, plus HF_HUB_OFFLINE/TRANSFORMERS_OFFLINE enabled.
+Observed cold load 26.6s, one two-choice inference 1.5s, process peak RSS about1.14GB.
+Checkpoint disk size is ~820MiB, not the earlier FP32 storage estimate. These are
+one-run observations. MPS is selectable but not verified or benchmarked in this task.
+
+Two simultaneous browser sessions shared one CPU model and made24 local inferences,
+with no hosted calls. Both hit the six-step limit after repeatedly selecting reload;
+this is incomplete exploration, not a search success. The earlier model chose Done
+prematurely; an independent catalog-response checkpoint now gates library-search
+completion. The integration is functional; zero-shot exploration quality is still
+unproven and needs strategy/model evaluation. No quality claim is inferred from
+confidence. The upstream loader's calibration warning concerns >10 choices, which
+this adapter never submits. See runs/laya-local-verified/ for the complete evidence.

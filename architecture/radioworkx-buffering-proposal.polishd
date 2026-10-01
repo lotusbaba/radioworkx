@@ -1,0 +1,151 @@
+// ALL CAPACITY VALUES BELOW ARE SYNTHETIC. Replace with measured budgets.
+// Source-derived architecture snapshot, 2026-10-01; not a live deployment audit.
+// No credentials, private endpoints, or measured-capacity claims.
+// Separate compute pools represent container roles, not separate physical machines.
+architecture RadioWorkx {
+  role Admin
+  gateway Funnel { tls = true tls_termination = true upstream_protocol = http routes_to Proxy }
+  load_balancer Proxy { supports_streaming = true response_buffering = true routes_to API }
+  compute_pool ApiContainer { instances = 1 }
+  compute_pool StationContainer { instances = 1 }
+  compute_pool WorkerContainers { instances = 1 }
+  compute_pool RedisContainer { instances = 1 max_stream_connections = 100 reserved_stream_connections = 10 }
+  compute_pool IngestContainers { instances = 1 }
+  compute_pool DashboardContainers { instances = 1 }
+
+  frontend Site {
+    rendering = server loaded_from API
+    page Home
+    page Library
+    page MyMusic
+    page AdminPage { requires role Admin }
+    Home navigates_to Library
+    Home navigates_to MyMusic
+    Home navigates_to AdminPage
+    Home invokes API.live
+    Home invokes API.search
+    Home invokes API.reaction
+  }
+  volume Media { storage = persistent }
+  volume TelemetryFiles { storage = persistent }
+  database State {
+    kind = relational hosted_on Postgres
+    table Tracks
+    table Users
+    table Sessions
+    table Playlists
+    table Plays
+    table Reactions
+    table Requests
+    table Outbox
+    table Jobs
+    table MediaObjects
+    table Embeddings
+  }
+  database_cluster Postgres { provider = self_hosted product = postgres }
+  cache RedisState { provider = self_hosted product = redis hosted_on RedisContainer }
+  stream Audio {
+    provider = self_hosted product = redis_stream hosted_on RedisContainer retention_messages = 160 source_rate_rps = 8 max_messages_rps = 1000
+  }
+  stream Events {
+    provider = self_hosted product = redis_stream hosted_on RedisContainer retention_messages = 2000 source_rate_rps = 1 max_messages_rps = 1000
+  }
+  artifact_store Objects { provider = localstack product = s3 }
+  queue ReactionJobs { provider = localstack product = sqs queue_type = standard visibility_timeout_seconds = 60 }
+  queue DownloadJobs { provider = localstack product = sqs queue_type = standard visibility_timeout_seconds = 900 }
+  queue CrawlJobs { provider = localstack product = sqs queue_type = standard visibility_timeout_seconds = 900 }
+  queue VisualJobs { provider = localstack product = sqs queue_type = standard visibility_timeout_seconds = 900 }
+  external_service LanguageAPI { tls = true }
+  external_service SpeechAPI { tls = true }
+  external_service VisualAPI { tls = true }
+  external_service LicensedSources { tls = true }
+
+  service API {
+    hosted_on ApiContainer
+    mounts Media { access = read_write }
+    // Synthetic combined subscription probe, not a deployed HTTP endpoint.
+    operation listenerPair { method = GET path = "/__model/listener-pair" consumes_from Audio consumes_from Events }
+    operation home { method = GET path = "/" }
+    operation search { method = GET path = "/api/library/search" reads State.Tracks }
+    operation live { method = GET path = "/api/live" requires authenticated consumes_from Audio }
+    operation events { method = GET path = "/api/events" reads State.Plays reads RedisState consumes_from Events }
+    operation reaction { method = POST path = "/api/reactions" requires authenticated writes State.Reactions writes State.Outbox }
+    operation chat { method = POST path = "/api/requests" requires authenticated reads State.Tracks reads State.Embeddings invokes LanguageAPI { protocol = https } writes State.Requests }
+    operation music { method = GET path = "/api/me/music" requires authenticated reads State.Playlists }
+    operation media { method = GET path = "/api/listen/*/audio" reads Media }
+    operation activity { method = GET path = "/api/admin/activity" requires role Admin reads ElasticEvents.Entries { protocol = http } }
+  }
+  service Dispatcher {
+    hosted_on WorkerContainers
+    operation dispatch {
+      method = POST path = "/dispatch" reads State.Outbox
+      publishes_to ReactionJobs publishes_to DownloadJobs publishes_to CrawlJobs publishes_to VisualJobs
+      writes State.Outbox
+    }
+  }
+  service ReactionWorker {
+    hosted_on WorkerContainers
+    operation process {
+      method = POST path = "/work" consumes_from ReactionJobs reads State.Outbox
+      writes RedisState writes State.Jobs publishes_to Events
+    }
+  }
+  service Downloads {
+    hosted_on WorkerContainers mounts Media { access = read_write }
+    operation process {
+      method = POST path = "/download" consumes_from DownloadJobs reads State.Outbox
+      invokes LicensedSources { protocol = https } writes Media writes State.Tracks writes State.Jobs
+    }
+  }
+  service Crawler {
+    hosted_on WorkerContainers
+    operation process { method = POST path = "/crawl" consumes_from CrawlJobs invokes LicensedSources { protocol = https } writes State.Tracks writes State.Outbox }
+  }
+  service Visuals {
+    hosted_on WorkerContainers mounts Media { access = read_write }
+    operation process { method = POST path = "/visual" consumes_from VisualJobs invokes VisualAPI { protocol = https } writes Media writes Objects writes State.MediaObjects }
+    operation restore { method = POST path = "/restore" reads Objects writes Media }
+  }
+  service Station {
+    hosted_on StationContainer mounts Media { access = read_write }
+    operation broadcast { method = POST path = "/broadcast" reads State.Tracks reads State.Playlists reads Media writes State.Plays publishes_to Audio publishes_to Events }
+    operation announce { method = POST path = "/announce" invokes SpeechAPI { protocol = https } writes Media }
+  }
+  // These are independent background pipelines, deliberately not synchronous API dependencies.
+  service TelemetryWriter {
+    hosted_on WorkerContainers mounts TelemetryFiles { access = read_write }
+    operation flush { method = POST path = "/flush" writes TelemetryFiles }
+  }
+  service Logstash {
+    hosted_on IngestContainers mounts TelemetryFiles { access = read_only }
+    operation ingest { method = POST path = "/ingest" reads TelemetryFiles writes ElasticEvents.Entries { protocol = http } }
+  }
+  service OpenSearchIngest {
+    hosted_on IngestContainers mounts TelemetryFiles { access = read_only }
+    operation ingest { method = POST path = "/ingest" reads TelemetryFiles writes SearchEvents.Entries { protocol = http } }
+  }
+  database ElasticEvents { kind = document hosted_on Elasticsearch collection Entries }
+  database_cluster Elasticsearch { provider = self_hosted product = elasticsearch }
+  database SearchEvents { kind = document hosted_on OpenSearch collection Entries }
+  database_cluster OpenSearch { provider = self_hosted product = opensearch }
+  service Kibana {
+    hosted_on DashboardContainers
+    operation view { method = GET path = "/" reads ElasticEvents.Entries { protocol = http } }
+  }
+  service Dashboards {
+    hosted_on DashboardContainers
+    operation view { method = GET path = "/" reads SearchEvents.Entries { protocol = http } }
+  }
+}
+scenario "Forty listeners with audio and SSE fit synthetic connection budget" {
+  request { entry = Funnel protocol = https path = "/__model/listener-pair" concurrent_connections = 40 }
+  expect { outcome = success reaches Audio reaches Events }
+}
+scenario "Fifty listeners exceed synthetic shared Redis budget" {
+  request { entry = Funnel protocol = https path = "/__model/listener-pair" concurrent_connections = 50 }
+  expect { outcome = error error = STREAM_CONNECTIONS_EXCEEDED }
+}
+scenario "Slow audio listener loses retained data" {
+  request { entry = Funnel protocol = https path = "/api/live" authenticated = true concurrent_connections = 1 consumer_lag_seconds = 21 }
+  expect { outcome = error error = STREAM_RETENTION_EXCEEDED }
+}

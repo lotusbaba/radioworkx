@@ -1,0 +1,40 @@
+name: Architecture checks
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: architecture-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  polish:
+    name: Polish architecture contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install pinned Polish
+        # Polish 0.11.0, including stream capacity and change planning.
+        run: python -m pip install 'polish-lang @ git+https://github.com/lotusbaba/polish-lang.git@c73cdfe1180ec5f477e3b003320a57bfba080e1f'
+      - name: Verify baselines and expected buffering regression
+        run: python -m unittest discover -s tests/architecture -v
+      - name: Upload architecture evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: polish-architecture-evidence
+          path: runs/polish-ci/
+          if-no-files-found: warn
+          retention-days: 14

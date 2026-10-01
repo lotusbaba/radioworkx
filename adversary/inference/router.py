@@ -1,4 +1,4 @@
-"""Pure routing rules for the proposed hybrid engine, not an execution policy."""
+"""Pure routing rules used by the hybrid decision service."""
 
 from adversary.models.decision import (
     BlockReason, DecisionBudget, DecisionPath, DecisionRequest, ModelAvailability,

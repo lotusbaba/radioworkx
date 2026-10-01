@@ -4,7 +4,7 @@ Both engines are implemented with separate decision backends:
 
 - `custom`: our observe → candidate builder → shared DecisionService → validated
   action loop. A single local Laya model chooses concrete candidates. No OpenAI key
-  is read and there is no hosted fallback.
+  is read unless `--generative-fallback` is explicitly enabled.
 - `browser-use`: the native Browser Use 0.13.10 agent and its OpenAI chat model
   adapter. Registered QA tools execute the same closed actions through Playwright.
   Its default navigation, JavaScript, file, shell, search and tab tools are disabled.
@@ -91,7 +91,7 @@ operation/target/group selection may require multiple calls per browser action a
 each consumes budget. The queue holds at most 100 waiting requests, with a single
 executor thread keeping native inference off the asyncio/browser loop. Cancellation
 discards an expired caller's result but does not interrupt native inference; shutdown
-waits for the active call and rejects queued requests. No hosted fallback exists.
+waits for the active call and rejects queued requests. Hosted reasoning is available only through the opt-in hybrid wrapper.
 Browser Use's OpenAI retries are disabled and output is capped at 1,024 tokens per
 call; its call limit is not a dollar-cost guarantee. `--max-steps` bounds agent iterations; the separate
 executor budget includes initial navigation. `--timeout` bounds session work.
@@ -231,8 +231,7 @@ for evaluation, never sent as answers. Existing Laya results are compared only
 when inputs match. The first live Jev run selected the expected action in **7/7**
 cases versus Laya's **0/7**. This is one prediction per case, not a browser test or
 reliability benchmark. The separate mocked client/report tests passed **18/18**.
-The custom browser agent still defaults to local Laya; coordinated sessions remain
-paused pending review. Wire format: <https://jev-ai.pro/docs>.
+The custom browser agent still defaults to local Laya; coordinated sessions were paused at the time of that report; see the integration below. Wire format: <https://jev-ai.pro/docs>.
 
 ### Laya Browser checkpoint swap (2026-09-30)
 
@@ -330,5 +329,33 @@ with Laya/Jev: verification uses deterministic policies and scripted execution.
 
 All three roadmap areas remain relevant: broader goals, coordinated social sessions,
 and routing/generative fallback. This stage implements the prerequisite state and
-completion handling plus broader search goals. Shared-fixture social coordination
-and live fallback integration are subsequent stages, not implemented by this change.
+completion handling plus broader search goals. Shared-fixture social coordination and runtime fallback were implemented in the following stage.
+
+
+### Coordinated social sessions and generative fallback (2026-10-01)
+
+`python -m adversary social-sessions --output runs/coordinated-social` runs a
+model-free protocol against one disposable QA app/database. Owner, follower and guest
+have separate browser contexts and cookie jars. API operations verify private access,
+unauthorized rename, follow/unshare and follow/delete races, listener-follow preservation,
+and republishing without automatic resubscription. Each race launches both requests
+concurrently; it does not guarantee every database interleaving. Reports include request
+statuses, seven explicit assertions and three role-specific Playwright traces. These are
+coordinated API checks with browser sessions, not model-driven UI social exploration.
+Rerun the protocol to repeat it; single-agent action replay does not replay this journal.
+
+Custom exploration supports `--generative-fallback --max-fallback-calls 4` with either
+`--decision-provider laya` or `jev`. It uses the existing OpenAI credential reader.
+The router sends up to ten routine candidates to the primary model; larger sets,
+incomplete coverage, unsupported operations, or two identical recent actions use OpenAI
+reasoning. Its structured output must select an existing observed candidate. It cannot
+invent selectors, payloads, code or arbitrary browser actions. Empty candidate sets
+stop incomplete. Both backends retain call limits, failed requests consume a call,
+and the session keeps its step/time limits. There is no dollar-spend reservation.
+Primary failure/budget exhaustion does not silently trigger a provider switch.
+
+Every decision records routing reason/backend and the selected candidate. OpenAI does
+not provide comparable choice probabilities. The deterministic executor and independent
+completion checks remain authoritative. Provider budgets are shared across sessions.
+The social protocol is independent of model inference; the two features can be tested
+separately. Live model quality requires a separately reported provider run.

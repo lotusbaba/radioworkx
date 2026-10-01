@@ -1,4 +1,6 @@
-from adversary.models.decision import AgentContext, DecisionRequest
+from asyncio import CancelledError
+
+from adversary.models.decision import AgentContext, DecisionRequest, CandidateCoverage
 from adversary.models.action import DoneAction
 
 
@@ -18,8 +20,14 @@ async def run(adapter, service, goal, values, max_steps):
             candidates = tuple(c for c in candidates if not isinstance(c.action, DoneAction))
         request = DecisionRequest(id=f'{adapter.session_id}-request-{adapter.step}',
             agent=AgentContext(session_id=adapter.session_id, strategy=getattr(service, 'strategy', 'custom-laya'), goal=goal),
-            observation=observation, candidates=candidates)
-        cid = await service.choose(request, history)
+            observation=observation, candidates=candidates,
+            coverage=CandidateCoverage(complete_for_decision=bool(candidates)))
+        try:
+            cid = await service.choose(request, history)
+        except (Exception, CancelledError):
+            adapter.recorder.write('decision_error', request_id=request.id,
+                inference=service.take_metrics(request.id))
+            raise
         candidate = next(c for c in request.candidates if c.id == cid)
         adapter.recorder.write('decision', engine=getattr(service, 'strategy', 'custom-laya'), request_id=request.id,
                                observation_id=observation.id, candidate_id=cid,

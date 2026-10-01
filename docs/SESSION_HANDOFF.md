@@ -1485,3 +1485,40 @@ User notes all roadmap areas are needed. Broader single-agent search goals now e
 shared-fixture coordinated social sessions and live model-routing/generative fallback
 remain subsequent integration work. No claim of their completion. Existing contracts
 and independent contexts do not constitute those integrations.
+
+## Coordinated social sessions and hybrid routing (2026-10-01)
+
+User authorized both coordinated social sessions and generative fallback, lifting the
+previous pause. Added `python -m adversary social-sessions --output <new-dir>`: one
+shared disposable QA schema/app, three browser contexts/cookie jars (owner/follower/
+guest), concurrent follow/revoke phases, deterministic access/ownership/follow cleanup
+checks, per-role traces and request/status journal. This is coordinated API testing
+using browser sessions, not autonomous multi-user UI exploration; its journal is not
+supported by single-agent replay. Existing fixture cleanup preserves live data.
+
+Added opt-in custom `--generative-fallback --max-fallback-calls 4`. HybridDecisionService
+uses the existing pure router and OpenAI structured candidate chooser; routine bounded
+choices use the primary Laya/Jev service. Oversized sets or repeated identical actions
+escalate to generative reasoning; empty candidates stop incomplete. No arbitrary code,
+selectors or payload generation. Both provider budgets are shared across sessions;
+engine step/time limits and independent completion remain authoritative. Routes and
+backend details appear in events/reports, without invented OpenAI probabilities.
+No automatic switch for provider failure or exhaustion. No dollar-cost reservation.
+
+Validation: framework suite176passed/10opt-in skipped; the new opt-in social integration
+was separately run and passed (runs/coordinated-social-tests.xml). The actual social
+report runs/coordinated-social/report.html passed 28 request/status expectations and
+seven state assertions with zero model calls. Hybrid unit tests cover routing, shared
+budget exhaustion, empty/invalid candidate rejection and the real OpenAI adapter with
+mock transport.
+
+Live local hybrid smoke runs/hybrid-search/report.html: OpenAI selected Click Search,
+then Laya did not finish its next local decision within180seconds. Report correctly
+records incomplete/time_limit, two executed actions including initial navigation,
+two dispatched model calls. Browser/QA fixture closed; lingering model-thread cleanup
+was terminated explicitly. This is not a successful full-goal Laya validation.
+
+Live Jev+OpenAI hybrid smoke runs/jev-hybrid-search/report.html completed the search
+goal with independent goal_achieved=true, no findings, five actions including navigation
+and framework completion, three model calls (two Jev, one OpenAI). This validates the
+runtime hybrid integration end to end; it does not resolve the local checkpoint stall.

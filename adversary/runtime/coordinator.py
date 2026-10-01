@@ -9,6 +9,7 @@ from urllib.parse import urlsplit, parse_qs
 
 from adversary.models.action import NavigateAction, browser_action_adapter
 from adversary.inference.openai import BudgetExhausted
+from adversary.inference.hybrid import RoutingBlocked
 from adversary.runtime.browser import BrowserAdapter
 from adversary.runtime.qa import qa_target, FIXTURE_VERSION
 from adversary.runtime.recording import Recorder
@@ -184,6 +185,9 @@ async def run_session(playwright, browser, directory, session_id, config, servic
                         await page.screenshot(path=str(directory / 'final.png'), full_page=True, timeout=5000)
                     finally:
                         await context.tracing.stop(path=str(directory / 'trace.zip'))
+    except RoutingBlocked as error:
+        summary.update(status='incomplete', termination='routing_blocked')
+        recorder.write('routing_blocked', reason=str(error))
     except (BudgetExhausted, TimeoutError) as error:
         summary.update(status='findings' if adapter and adapter.findings else 'incomplete',
                        termination='model_call_limit' if isinstance(error, BudgetExhausted) else 'time_limit')
@@ -228,6 +232,8 @@ async def coordinate(directory, config, service=None, replay=None):
             if browser:
                 await browser.close()
     result = {'sessions': summaries, 'model_calls': service.calls if service else 0}
+    if hasattr(service, 'call_counts'):
+        result['model_calls_by_backend'] = service.call_counts
     (directory / 'summary.json').write_text(json.dumps(result, indent=2))
     links = ''.join(f'<li><a href="{s["session_id"]}/report.html">{s["session_id"]}</a>: '
                     f'{html.escape(s["status"])} ({html.escape(s["termination"])})</li>' for s in summaries)

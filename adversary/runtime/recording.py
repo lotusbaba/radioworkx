@@ -16,8 +16,12 @@ def fingerprint(kind, message):
 def choice_tables(events):
     sections = []
     for event in events:
-        if event['kind'] != 'decision':
+        if event['kind'] not in ('decision', 'decision_error'):
             continue
+        route = event.get('inference', {}).get('route')
+        if route:
+            sections.append('<p>Route: ' + html.escape(route['path']) + ' — ' +
+                html.escape(route['reason']) + '</p>')
         for index, stage in enumerate(event.get('inference', {}).get('stages', []), 1):
             heading = html.escape(f"{event.get('request_id', '')} — stage {index}")
             if stage.get('selection') == 'deterministic':
@@ -26,7 +30,10 @@ def choice_tables(events):
                 continue
             probabilities = stage.get('probabilities')
             if probabilities is None:
-                continue  # Historical records did not store the distribution.
+                if stage.get('provider'):
+                    sections.append(f'<h3>{heading}</h3><p>Generative selection: ' +
+                        html.escape(stage['choices'].get(stage['selected'], stage['selected'])) + '. Provider does not supply choice probabilities.</p>')
+                continue  # Do not invent probabilities.
             rows = ''.join('<tr><td>' + html.escape(label) + '</td><td>'
                 + html.escape(stage['choices'][label]) + f'</td><td>{probability:.2%}</td><td>'
                 + ('Selected' if label == stage['selected'] else '') + '</td></tr>'
@@ -65,6 +72,7 @@ class Recorder:
             'pre{white-space:pre-wrap;overflow-wrap:anywhere}a{margin-right:1rem}</style>'
             '<h1>' + html.escape(summary['status']) + '</h1>'
             '<a href="summary.json">Summary</a><a href="actions.jsonl">Actions</a>'
-            '<a href="trace.zip">Playwright trace</a><a href="final.png">Screenshot</a>'
+            + ''.join(f'<a href="{html.escape(p.name)}">{html.escape(p.name)}</a>'
+                      for p in sorted(self.directory.glob('*')) if p.suffix in ('.zip', '.png'))
             + choice_tables(self.events) + '<h2>Raw event records</h2><table>' + rows + '</table>')
         self.file.close()

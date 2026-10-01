@@ -254,3 +254,16 @@ contracts; Phase 2 supplies the isolated container/fixtures; Phases 3–6 prove
 execution/recording/replay/detection; Phase 8 adds strategy-driven exploration.
 Report coverage, confirmed/suspected findings and reproduction separately. Missing
 paths or unspecified policy are not applicable/pending, never silently counted as pass.
+
+### Coordinated social harness
+
+Run `python -m adversary social-sessions --output runs/coordinated-social` for a
+shared disposable fixture with owner, follower and guest cookie jars. The deterministic
+protocol covers private/public access, unauthorized rename, follow racing with unshare
+and deletion, preservation of listener follows, and no resubscription on republish.
+It records 28 request/status expectations plus seven state assertions and per-role
+traces. It is an API/session integration run, not autonomous social UI exploration.
+
+Custom goal exploration may separately enable `--generative-fallback` to route complex
+or repeated choices to the configured OpenAI model. Known social security assertions
+remain deterministic; model output never decides whether a requirement passed.

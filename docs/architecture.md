@@ -688,6 +688,30 @@ Implementation order for the remaining roadmap:
 2. Coordinated social sessions with shared fixtures, distinct identities and explicit barriers.
 3. Runtime routing and generative fallback with bounded budgets and the same execution guards.
 
-Steps2/3 require their own integration checks; existing isolated sessions are not
-shared-fixture multi-user coordination, and existing routing contracts are not a
-claim that live generative fallback has been integrated.
+Steps 2/3 now have implementations: `social-sessions` shares one QA fixture across
+owner/follower/guest cookie jars for deterministic social API checks; the custom engine
+can opt into `--generative-fallback` for constrained OpenAI action selection. This does
+not yet add autonomous multi-user UI exploration or arbitrary generated browser actions.
+See [runtime details](adversary-framework.md#coordinated-social-sessions-and-generative-fallback-2026-10-01).
+
+Implemented coordinated fixture and hybrid decision flow:
+
+```text
+social-sessions coordinator                 custom goal runner
+          |                                        |
+   one disposable QA app                    observe + candidates
+   and PostgreSQL schema                           |
+          |                                 deterministic router
+   +------+------+                          /                 \
+   |      |      |                    routine choices     reasoning needed
+ owner follower guest                      |                  |
+   |      |      |                      Laya / Jev          OpenAI
+ separate browser contexts                  \                 /
+ and independent cookie jars                 validated candidate
+   |      |      |                                  |
+ concurrent follow/revoke phases             guarded executor
+          |                                         |
+ deterministic state checks                 independent goal oracle
+          |                                         |
+ report + three role traces                  recorded actions/report
+```

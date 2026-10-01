@@ -1,0 +1,105 @@
+name: Application and adversarial tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    name: ${{ matrix.suite }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    defaults:
+      run:
+        shell: bash
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [application, agent-framework, adversarial-browser, isolated-smoke]
+    services:
+      postgres:
+        image: postgres:13
+        env:
+          POSTGRES_USER: radioworkx_test
+          POSTGRES_PASSWORD: local-test-only
+          POSTGRES_DB: radioworkx_test
+        ports:
+          - 55432:5432
+        options: >-
+          --health-cmd "pg_isready -U radioworkx_test -d radioworkx_test"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+    env:
+      TEST_DATABASE_URL: postgresql://radioworkx_test:local-test-only@127.0.0.1:55432/radioworkx_test
+      DATA_DIR: ${{ runner.temp }}/rwx-data
+      AWS_ACCESS_KEY_ID: testing
+      AWS_SECRET_ACCESS_KEY: testing
+      AWS_DEFAULT_REGION: us-east-1
+      AWS_EC2_METADATA_DISABLED: 'true'
+      TELEMETRY_ENABLED: '0'
+      PYTHONUNBUFFERED: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: requirements.lock
+      - name: Install test dependencies
+        run: python -m pip install -r requirements.lock 'playwright==1.62.0'
+      - name: Install Chrome and system dependencies
+        if: matrix.suite != 'application'
+        run: python -m playwright install --with-deps chrome
+      - name: Prepare result directories
+        run: mkdir -p runs/ci/browser-artifacts
+      - name: Application unit, API and deterministic adversarial tests
+        if: matrix.suite == 'application'
+        run: >-
+          python -m pytest tests --ignore=tests/adversary --ignore=tests/architecture
+          --ignore=tests/test_catalog_search_browser.py
+          --ignore=tests/test_catalog_search_adversarial.py
+          --ignore=tests/test_social_browser.py
+          -ra --junitxml=runs/ci/application.xml
+      - name: Agent framework and isolated multi-session browser tests
+        if: matrix.suite == 'agent-framework'
+        env:
+          RWX_FRAMEWORK_TESTS: '1'
+        run: >-
+          python -m pytest tests/adversary --confcutdir=tests/adversary
+          --basetemp=runs/ci/framework-tmp -ra --junitxml=runs/ci/agent-framework.xml
+      - name: Browser adversarial regressions
+        if: matrix.suite == 'adversarial-browser'
+        env:
+          RWX_BROWSER_TESTS: '1'
+          RWX_TEST_ARTIFACTS: runs/ci/browser-artifacts
+        run: >-
+          python -m pytest tests/test_account_scenarios.py tests/test_social_browser.py
+          tests/test_catalog_search_browser.py tests/test_catalog_search_adversarial.py
+          -k 'not test_playlist_duplicate_names'
+          -ra --junitxml=runs/ci/adversarial-browser.xml
+      - name: Account and social browser smoke
+        if: matrix.suite == 'isolated-smoke'
+        run: python scripts/accounts_smoke.py 2>&1 | tee runs/ci/accounts-smoke.log
+      - name: Playback transition smoke
+        if: ${{ !cancelled() && matrix.suite == 'isolated-smoke' }}
+        run: python scripts/transition_smoke.py 2>&1 | tee runs/ci/transition-smoke.log
+      - name: Upload results and browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tests-${{ matrix.suite }}
+          path: |
+            runs/ci/
+            /tmp/radioworkx-accounts/
+          if-no-files-found: warn
+          retention-days: 14

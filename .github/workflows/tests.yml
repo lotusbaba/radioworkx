@@ -57,6 +57,15 @@ jobs:
           cache-dependency-path: requirements.lock
       - name: Install test dependencies
         run: python -m pip install -r requirements.lock 'playwright==1.62.0'
+      - name: Provision shared PostgreSQL extension
+        # Extensions belong to the database, not each concurrent QA schema.
+        run: |
+          python - <<'PYTHON'
+          import os
+          import psycopg
+          with psycopg.connect(os.environ['TEST_DATABASE_URL'], autocommit=True) as connection:
+              connection.execute('CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public')
+          PYTHON
       - name: Install Chrome and system dependencies
         if: matrix.suite != 'application'
         run: python -m playwright install --with-deps chrome

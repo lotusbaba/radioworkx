@@ -3,7 +3,9 @@
 GitHub Actions runs `.github/workflows/tests.yml` for pull requests, pushes to `main`,
 and manual dispatch. Its four independent jobs use Python 3.13, locked application
 dependencies and disposable PostgreSQL 13 service containers. Browser jobs install
-Playwright 1.62.0 and Chrome. No live API keys or production connections are configured.
+Playwright 1.62.0 and Chrome. The database-wide `pg_trgm` extension is provisioned
+once before concurrent QA sessions create their isolated schemas, avoiding a cold-start
+extension-creation race. No live API keys or production connections are configured.
 
 | Job | Coverage | Evidence artifact |
 | --- | --- | --- |
